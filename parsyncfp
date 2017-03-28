@@ -4,7 +4,14 @@ use Getopt::Long;      # for std option handling: -h --yadda=badda, etc
 use Socket;
 use Env qw(HOME PATH);
 use File::Path qw(remove_tree);
- 
+
+# git add  parsyncfp                # stage the file for the commit
+# git commit -m 'commit message'  # commits the file back
+
+# after significant changes, update the tarball and cp to moo for distribution; update the github
+# cd ; cp ~/bin/parsyncfp ~/parsync/; tar -cvzf parsync+utils.tar.gz parsync; scp parsync+utils.tar.gz moo:~/public_html/parsync ; cp ~/bin/parsync ~/gits/parsync; git add  parsync; git commit -m 'commit message'
+
+
 # TODO
 # detect a bad or faulty ssh connection and exit with an informative message.
 # - when catching up to a previous rsync, should cycle fast until it's all 
