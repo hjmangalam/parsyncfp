@@ -108,7 +108,9 @@ be used to denote that option.<br>
 ## Examples
 
 ### Good Example 1
-```% parsyncfp  --maxload=5.5 --NP=4 --startdir='/home/hjm' dir1 dir2 dir3 hjm@remotehost:~/backups```
+```
+% parsyncfp  --maxload=5.5 --NP=4 --startdir='/home/hjm' dir1 dir2 dir3 hjm@remotehost:~/backups
+```
 
 where:
 
@@ -120,7 +122,9 @@ where:
 It uses 4 instances to rsync dir1 dir2 dir3 to hjm@remotehost:~/backups
 
 ###  Good Example 2
-```% parsyncfp --rsyncopts="-a -s --ignore-existing" --reusecache  --NP=3 --barefiles  *.txt   /mount/backups/txt```
+```
+% parsyncfp --rsyncopts="-a -s --ignore-existing" --reusecache  --NP=3 --barefiles  *.txt   /mount/backups/txt
+```
 
 where
 -  "--rsyncopts='-a -s --ignore-existing'" are options passed to rsync
@@ -147,20 +151,22 @@ parsyncfp   --checkperiod 6  --NP 3 --interface eth0  --chunksize=87682352
 
 where
 
-= --chunksize=87682352 - shows that the chunksize option can be used with explicit
+- --chunksize=87682352 - shows that the chunksize option can be used with explicit
 integers as well as the human specifiers (TGMK).
 
-= --rsyncopts="--exclude='[abc]*'" - shows the correct form for excluding files
+- --rsyncopts="--exclude='[abc]*'" - shows the correct form for excluding files
 based on regexes (note the quoting)
 
-= nacs/fabio - shows that you can specify subdirs as well as top-level dirs (as
+- nacs/fabio - shows that you can specify subdirs as well as top-level dirs (as
 long as the shell is positioned in the dir above, or has been specified via
 '--startdir'
 
 ### Good Example 4
 
-```parsyncfp -v 1 --nowait --ac pfpcache1 --NP 4 --cp=5 --cs=50M --ro '-az'  
-linux-4.8.4 moo:~/test```
+```
+parsyncfp -v 1 --nowait --ac pfpcache1 --NP 4 --cp=5 --cs=50M --ro '-az'  
+linux-4.8.4 moo:~/test
+```
 
 where
 
