@@ -88,22 +88,21 @@ to the screen.
 The syntax 'longarg|shortarg' means that either the long or short form may 
 be used to denote that option.<br>
 
-- --NP|np [i] (sqrt(#CPUs)) ..............  number of rsync processes to start optimal NP depends on many vars.   Try the default and incr as needed
-- --altcache|ac (~/.parsyncfp) ..... alternative cache dir for placing it on a another FS or for running multiple  parsyncfps simultaneously
-- --startdir|sd [s] (`pwd`)  ..................  the directory it starts at(*)
-- --maxbw [i] (unlimited) ...........  in KB/s max bandwidth to use (--bwlimit  passthru to rsync).  maxbw is the total BW to be used, NOT per rsync.
-- --maxload|ml [f] (NP+2)  ..........  max system load - if sysload > maxload, an rsync proc will sleep for 10s
-- --chunksize|cs [s] (10G) .... aggregate size of files allocated to one rsync  process.  Can specify in 'human' terms [100M, 50K, 1T] as well as integer bytes.
-- --rsyncopts|ro [s]  ...  options passed to rsync as quoted string (CAREFUL!) this opt triggers a pause before executing to verify the command(+)
-- --interface|i [s]  ......  network interface to monitor (not use; see above)
-- --checkperiod|cp [i] (5) ........ sets the period in seconds between updates
-- --verbose|v [0-3] (2) ...sets chattiness. 3=debug; 2=normal; 1=less; 0=none
-  This only affects verbosity post-start; warning & error messages will still be printed.
-- --dispose|d [s] (l) .... what to do with the cache files. (l)eave untouched, (c)ompress to a tarball, (d)elete.
-- --email [s]  .....................  email address to send completion message
-- --nowait  .............  for scripting, sleep for a few s instead of pausing
-- --version  .................................  dumps version string and exits
-- --help  .........................................................  this help
+- --NP|np [i] (sqrt(#CPUs)) : number of rsync processes to start optimal NP depends on many vars.   Try the default and incr as needed
+- --altcache|ac (~/.parsyncfp) : alternative cache dir for placing it on a another FS or for running multiple  parsyncfps simultaneously
+- --startdir|sd [s] (`pwd`) : the directory it starts at(*)
+- --maxbw [i] (unlimited) : in KB/s max bandwidth to use (--bwlimit  passthru to rsync).  maxbw is the total BW to be used, NOT per rsync.
+- --maxload|ml [f] (NP+2)  :  max system load - if sysload > maxload, an rsync proc will sleep for 10s
+- --chunksize|cs [s] (10G) : aggregate size of files allocated to one rsync  process.  Can specify in 'human' terms [100M, 50K, 1T] as well as integer bytes.
+- --rsyncopts|ro [s] : options passed to rsync as quoted string (CAREFUL!) this opt triggers a pause before executing to verify the command(+)
+- --interface|i [s] : network interface to monitor (not use; see above)
+- --checkperiod|cp [i] (5) : sets the period in seconds between updates
+- --verbose|v [0-3] (2) : sets chattiness. 3=debug; 2=normal; 1=less; 0=none.    This only affects verbosity post-start; warning & error messages will still be printed.
+- --dispose|d [s] (l) : what to do with the cache files. (l)eave untouched, (c)ompress to a tarball, (d)elete.
+- --email [s] : email address to send completion message
+- --nowait  :  for scripting, sleep for a few s instead of pausing
+- --version : dumps version string and exits
+- --help : this help
 
 ## Examples
 
