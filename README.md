@@ -139,8 +139,11 @@ It uses 3 instances to rsync *.txt from the current dir to "/mount/backups/txt".
 
 
 ### Good Example 3
-```parsyncfp   --checkperiod 6  --NP 3 --interface eth0  --chunksize=87682352 
-   --rsyncopts="--exclude='[abc]*'"  nacs/fabio   hjm@moo:~/backups```
+
+```
+parsyncfp   --checkperiod 6  --NP 3 --interface eth0  --chunksize=87682352 
+   --rsyncopts="--exclude='[abc]*'"  nacs/fabio   hjm@moo:~/backups
+```
 
 where
 
