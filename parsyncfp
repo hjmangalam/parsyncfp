@@ -12,38 +12,57 @@ use File::Path qw(remove_tree);
 
 # after significant changes, update the tarball and cp to moo for distribution; update the github
 # cd ; cp ~/bin/parsyncfp ~/parsync/; tar -cvzf parsync+utils.tar.gz parsync; scp parsync+utils.tar.gz moo:~/public_html/parsync ; 
-# cd ~/gits/parsyncfp; cp ~/bin/parsyncfp .; git add parsyncfp; git commit -m 'commit message'; git push
+# cd ~/gits/parsyncfp; cp ~/bin/parsyncfp .; git add parsyncfp README.md; git commit -m 'commit message'; git push
 
 # TODO
-# detect a bad or faulty ssh connection and exit with an informative message.
-# - when catching up to a previous rsync, should cycle fast until it's all 
-#    caught up then drop back to regular periodicity. Maybe, regardless of 
+# add --quiet - actually --verbose 1-3 (change to -vvv? with counting option: https://goo.gl/68e1
+# only ERROR is at 0, no scrolling output
+# only WARN & ERROR is at 1, scrolling just overwrites
+# INFO, WARN & ERROR & scrolling stuff is at 2
+# DEBUG is at 3
+
+# DONE - add job-specific caching to run multiple parsyncfp's on the same machine at the same time.
+# DONE - add option to place cache files somewhere other than $HOME
+# DONE - the 2 above can be answered with the one option: --altcache 
+
+# DONE - remove re-use cache - no need anymore since fpf will start transferring immediately
+# make parsync commands and syntax more rsync-like.  
+# DONE - ie handle barefiles transparently 
+# compress and decompress chunk files /cache - maybe better is to check # of 
+# chunk files while being generated and warn if > some # (1000?)
+# and then based on a flag, compress or delete them after the whole run or as they're finished with.
+# after the run
+# DONE - handle empty dirs gracefully
+# check github for bug reports.
+
+# specification of sources
+# - compress/decompress chunk files when transiting them so they don't tak up too much space.
+# DONE - - use 'find . -name 'regex' ' to process lists of files rather than ls globbing.
+# still using ls, but as '\ls -U' - 10X faster.
+# see note from james Ziller about the faults he had:
+#               /usr/bin/ls: Argument list too long
+# https://goo.gl/lECBnP  & https://goo.gl/OomdIz
+# or use 'find .' unaliases any ls and doesn't sort the output, so it /very/ fast
+# DONE - when catching up to a previous rsync, should cycle fast until it's all 
+# caught up then drop back to regular periodicity. Maybe, regardless of 
 # requested cycle time, it cycles very fast for the 1st few to check that it's caught up?
-# - check section where: INFO: Waiting for fpart to get ahead of the transfer
-#   (~392 - this seems to be infinite-looping in a few cases.
-# - use this form for DEBUGs: if ($DEBUG){&debug(__LINE__, "RPMLIST = [$rpmlist]\n")}
-# - look into either writing a new script or expanding this one for another use;
-#   first time or one-time data movement - ie no rsync capabilities needed.
-#   uses fpart -L -> tar -> pigz -> nc/mbuffer -> network and then reverse.
-#   the order to place data on the remote target.
-# - refactor this code - what a mess.
 
 use vars qw($allPIDs $ALL_SYS_RSYNC_PIDS $BAREFILES $ch $CHECKPERIOD $cmd 
 $crr $CUR_FP_FLE $CUR_FPI $DATE $dcnt $DEBUG @DIRS @DIRS2SYNC $dirtmp 
 $EMAIL $Filecnt %FILES $fl $fn $fnd2r $FOUT $FPART_LOGFILE $FPART_PID 
 $FPART_RUNNING $FPARTSIZE $FPARTSIZE_N $FP_PIDFILE $FP_ROOT $cyclecnt
-$FP_ROOT_DIR $FP_RUNNING $hdr_cnt $hdr_rpt $HELP $IF_SPEED 
+$FP_ROOT_DIR $FP_RUNNING $hdr_cnt $hdr_rpt $HELP $IF_SPEED $VERBOSE
 $LOAD1mratio $loadavg $logfile $MAXBW $MAXLOAD $nbr_cur_fpc_fles 
-$NBR_FP_FLES $NCPUs $NDIRS $NETIF $NOWAIT $NP $NP_chunk $glob
-$parsync_dir $PARSYNCVER $PIDFILE $PIDFILE $prev_cache $QUIET $lenPID
+$NBR_FP_FLES $NCPUs $NDIRS $NETIF $NOWAIT $NP $NP_chunk $glob $ALTCACHE
+$parsync_dir $PARSYNCVER $PIDFILE $PIDFILE $prev_cache $lenPID $DISPOSE
 $rem_host $remote $rem_path $rem_user $REUSECACHE $rootdir $rPIDs $sPIDs
 $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
 @SYSLOAD $TARGET $tmp $Totlsiz %UTILS $VERSION $OS $Linux $MacOSX $NETFILE $myIP
 );
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.31 (beta)
-Apr 29, 2017
+parsyncfp version 1.40 (beta)
+June 4, 2017
 by Harry Mangalam <hjmangalam\@gmail.com> || <harry.mangalam\@uci.edu>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -52,32 +71,34 @@ network connections to increase the amount of bandwidth it can use.
 The 'fp' variant uses 'fpart' <https://sourceforge.net/projects/fpart/> 
 to bypass the need for a full recursive descent of the dir trees before 
 the actual transfer starts.
-
 VERSION
 
 if (! @ARGV) {usage();} # in case someone doesn't know what to do.
 
 
 &GetOptions(
-  "startdir=s"       =>   \$ROOTDIR,     # Have to be able to set rootdir -> SRC in rsync
-  "rsyncopts=s"      =>   \$RSYNCOPTS,   # passthru to rsync as a string
-  "NP=i"             =>   \$NP,          # number of rsync processes to start
-  "chunksize=s"      =>   \$FPARTSIZE,   # the size that fpart chunks (allow PpTtGgMmKk)
-  "reusecache!"      =>   \$REUSECACHE,  # dont re-read dirs, re-use existing ones.
-  "checkperiod=i"    =>   \$CHECKPERIOD, # # of sec between system load checks
+  "startdir|sd"      =>   \$ROOTDIR,     # Have to be able to set rootdir -> SRC in rsync
+  "altcache|ac=s"    =>   \$ALTCACHE,    # alternative cache instead of ~/.parsyncfp
+  "rsyncopts|ro=s"   =>   \$RSYNCOPTS,   # passthru to rsync as a string
+  "NP|np=i"          =>   \$NP,          # number of rsync processes to start
+  "chunksize|cs=s"   =>   \$FPARTSIZE,   # the size that fpart chunks (allow PpTtGgMmKk)
+  "checkperiod|cp=i" =>   \$CHECKPERIOD, # # of sec between system load checks
   "maxbw=i"          =>   \$MAXBW,       # max bw to use (--bwlimit=KBPS passthru to rsync)
-  "maxload=f"        =>   \$MAXLOAD,     # max system load - if > this, sleep rsyncs
+  "maxload|ml=f"     =>   \$MAXLOAD,     # max system load - if > this, sleep rsyncs
   "email=s"          =>   \$EMAIL,       # email to notify when finished
-  "interface=s"      =>   \$NETIF,       # network interface to use if multiple ones
-  "nowait!"          =>   \$NOWAIT,      # sleep a few s rather than wait for a user ack
+  "interface|i=s"    =>   \$NETIF,       # network interface to use if multiple ones
+  "verbose|v=i"      =>   \$VERBOSE,     # how chatty it should be.
+  "nowait|nw!"       =>   \$NOWAIT,      # sleep a few s rather than wait for a user ack
   "help!"            =>   \$HELP,        # dump usage, tips
   "version!"         =>   \$VERSION,     # duh..
-  "debug!"           =>   \$DEBUG,       # requests more developer-level info
+  "disposal|d=s"     =>   \$DISPOSE,     # what to do with the cache (compress, delete, leave untouched)
+  "debug|d!"         =>   \$DEBUG,       # developer-level info; (historical) alias for '-v 3'
 );
 
 ## Set up run-permanent variables.
 $DATE=`date +"%T_%F" | sed 's/:/./g' `; chomp $DATE;
-$parsync_dir = $HOME . "/.parsyncfp";
+if (! defined $ALTCACHE) {$parsync_dir = $HOME . "/.parsyncfp";}
+else {$parsync_dir = $ALTCACHE; mkdir $parsync_dir;}
 $NETFILE = "/proc/net/dev";
 $OS = `uname -s`; chomp $OS;
 $Linux = $MacOSX = 0;
@@ -85,15 +106,14 @@ if ($OS =~ /Linux/) {$Linux = 1;} else {$MacOSX = 1;}
 $DFLT_RSYNCOPTS = "-a -s"; # the default options to pass to rsync; blanked if define $RSYNCOPTS
 if (defined $VERSION) { print $PARSYNCVER; exit;}
 if (!defined $CHECKPERIOD) {$CHECKPERIOD = 5;}
+if (!defined $VERBOSE) {$VERBOSE = 2;}
 if (!defined $RSYNCOPTS) {$RSYNCOPTS = ""; $DFLT_RSYNCOPTS = "-a -s";}
 else {$DFLT_RSYNCOPTS = "";} # if def $RSYNCOPTS, then user takes all responsibility
 #if (defined $HELP ||  @ARGV == 0) { usage(); }
 if (defined $HELP) {usage($parsync_dir);}
+if (!defined $DISPOSE) {$DISPOSE = 'l';} # for leave untouched
 
-
-if (! defined $QUIET) {$QUIET = 0;}
-
-check_utils(); # check that the required utilities are on the system
+# check_utils(); # check that the required utilities are on the system
 
 ### get the current system stats:  #CPUs, load, bandwidth, etc
 
@@ -122,20 +142,8 @@ if (! defined $NETIF) {
     }
 }
 
-
-# ### get the current system stats:  #CPUs, load, bandwidth, etc
-# # CPUs
-# $NCPUs = `cat /proc/cpuinfo | grep processor | wc -l`; chomp $NCPUs;
-# $loadavg = `cat /proc/loadavg | tr -d '\n'`;
-# @SYSLOAD = split (/\s+/, $loadavg); # 1st 3 fields are 1, 5, 15m loads
-# # so as long as the 1m load / NCPUs < 1, we're fine; if > 1, we may want to start throttling..
-# $LOAD1mratio = $SYSLOAD[0] / $NCPUs;
-# 
-# if (! defined $NETIF) {$NETIF = `/sbin/route -n | grep "^0.0.0.0" | rev | cut -d' ' -f1 | rev`; chomp $NETIF}
-#if (! defined $CHECKPERIOD || $CHECKPERIOD < 5) {$CHECKPERIOD = 5;} # really 10s due to the 5s of network sampling
-#elsif ($CHECKPERIOD >= 5) {$CHECKPERIOD -= 5;}
-
-
+if (defined $DEBUG) {$VERBOSE = 3;} # DEBUG = VERBOSE=3
+if (defined $VERBOSE && ($VERBOSE < 0 || $VERBOSE > 3)) {die "ERROR: --verbose arg must be 0-3. Try again.\n";}
 if (! defined $NP){$NP = int(sqrt($NCPUs)+ 0.5);} # round sqrt(NCPUs) (hyperthreaded if Intel) 8 -> 3
 if (! defined $MAXBW) {$MAXBW = 1000000;} # essentially unlimited
 else {$MAXBW = int($MAXBW / $NP + 0.5);} # users expect total maxbw; so have to divide by NP.
@@ -160,10 +168,10 @@ elsif ($NETIF =~ /wlan/) {
 chomp $IF_SPEED;
 
 if ($DEBUG){
-  print "\tEVAL: Using network interface [$NETIF] with connection quality [$IF_SPEED]\n\n";}
+  print "\tDEBUG: Using network interface [$NETIF] with connection quality [$IF_SPEED]\n\n";}
   if ($SYSLOAD[0] < $MAXLOAD){
   if ($DEBUG){
-    print "\n\tEVAL: 1m load is [$SYSLOAD[0]] and the 1m Load:#CPU ratio is [$LOAD1mratio] ( [$NCPUs] CPU cores).
+    print "\n\tDEBUG: 1m load is [$SYSLOAD[0]] and the 1m Load:#CPU ratio is [$LOAD1mratio] ( [$NCPUs] CPU cores).
 	    OK to continue.\n "
   }
 } else {
@@ -174,31 +182,26 @@ if ($DEBUG){
 $FP_ROOT_DIR = $parsync_dir . "/fpcache";
 
 if (-d $parsync_dir && ! defined $REUSECACHE) {
-  my $ls = `ls -l $parsync_dir | head -22`;
-  print <<LS;
+  if ($VERBOSE >= 1) {print <<LS;
 
   WARN: about to remove all the old cached chunkfiles from [$FP_ROOT_DIR].
-  ^C to stop this.
-  
+  Enter ^C to stop this.
+        If you specified '--nowait', cache will be cleared in 3s regardless.
   Otherwise, hit [Enter] and I'll clear them.
-  If you specified '--nowait', I'll continue in 5s regardless.
-  
 LS
+}
 
-$glob = $FP_ROOT_DIR . "/fpc.*";
-
-  if ($NOWAIT){ sleep 5;}
+$glob = $FP_ROOT_DIR . "/f*";
+  if ($NOWAIT){ sleep 3;}
   else {pause();}
   system("rm -f $glob");
-  print "INFO: The fpart chunk files [$glob] are cleared.. continuing\n";
+  if ($VERBOSE >=2 ) {print "INFO: The fpart chunk files [$glob] are cleared.. continuing\n";}
 } elsif (! -d $parsync_dir) {
    mkdir  $parsync_dir or die "FATAL: Can't mkdir [$parsync_dir]\n";
 }
 
-
-
 if (! -d $FP_ROOT_DIR) {mkdir $FP_ROOT_DIR or die "FATAL: Can't make 'FP_ROOT_DIR' [$FP_ROOT_DIR]\n";}
-$FP_ROOT = $FP_ROOT_DIR . "/fpc";  # the root name of the fpart chunk files fpc.1, etc
+$FP_ROOT = $FP_ROOT_DIR . "/f";  # the root name of the fpart chunk files f.1, etc
 $PIDFILE = $FP_ROOT_DIR . '/' . "rsync-PIDs" . '-' . $DATE;
 $FPART_LOGFILE = $FP_ROOT_DIR . '/' . "fpart.log." . $DATE;
 $FP_PIDFILE = $FP_ROOT_DIR . '/' . "FP_PIDFILE" . $DATE;
@@ -230,33 +233,33 @@ while (defined $dirtmp) { # should work on explicitly named dirs as well as glob
 $#ARGV++; # now incr to allow the TARGET to be captured.
 my @cachefiles = (); # will populate with list of cachefiles to process together.
 
-### TODO REUSECACHE
-my $rsls = `ls -1 $FP_ROOT_DIR`;
-#print "DEBUG: rsls = $rsls\n";
-my $glob =  $FP_ROOT_DIR . "/fpc.*";
-if ($rsls =~ 'fpc') {$prev_cache = `ls -1 $glob`; }
-elsif (defined $REUSECACHE){
-  print "!!WARN: You chose '--reusecache', but there's no files for it. Unsetting that option\n\n.";
-  undef $REUSECACHE; sleep 1;
-}
+# ### TODO REUSECACHE
+# my $rsls = `ls -1 $FP_ROOT_DIR`;
+# #print "DEBUG: rsls = $rsls\n";
+# my $glob =  $FP_ROOT_DIR . "/f.*";
+# if ($rsls =~ 'f') {$prev_cache = `ls -1 $glob`; }
+# elsif (defined $REUSECACHE){
+#   print "!!WARN: You chose '--reusecache', but there's no files for it. Unsetting that option\n\n.";
+#   undef $REUSECACHE; sleep 1;
+# }
 
-## This is the big REUSECACHE SECTION.  ONlY enter if want to REUSECACHE
-if (defined $REUSECACHE && -d $FP_ROOT_DIR){
-  print "!!WARN: NOT GENERATING NEW CACHE; RE-USING ALL OF PREVIOUS CACHE.
-This includes the following cache files from [$FP_ROOT_DIR]:
---------------------------------------------------------------------
-$prev_cache
---------------------------------------------------------------------
-If you want to ignore some of these cachefiles, delete them or move them out of the way.
-Hit [CTRL + C] to cancel or .. ";
-  if ($NOWAIT){
-    print " Actually... Not waiting.  You have 5 sec to cancel.\n";
-    sleep 5;
-  } else{ pause(); }
-
-  # now have to populate the @cachefiles array from the existing cachefiles
-  my $nn = @cachefiles = split(/\n/,$prev_cache);
-} else {  # forking the fpart partitioner
+# ## This is the big REUSECACHE SECTION.  ONlY enter if want to REUSECACHE
+# if (defined $REUSECACHE && -d $FP_ROOT_DIR){
+#   print "!!WARN: NOT GENERATING NEW CACHE; RE-USING ALL OF PREVIOUS CACHE.
+# This includes the following cache files from [$FP_ROOT_DIR]:
+# --------------------------------------------------------------------
+# $prev_cache
+# --------------------------------------------------------------------
+# If you want to ignore some of these cachefiles, delete them or move them out of the way.
+# Hit [CTRL + C] to cancel or .. ";
+#   if ($NOWAIT){
+#     print " Actually... Not waiting.  You have 5 sec to cancel.\n";
+#     sleep 5;
+#   } else{ pause(); }
+# 
+#   # now have to populate the @cachefiles array from the existing cachefiles
+#   my $nn = @cachefiles = split(/\n/,$prev_cache);
+# } else {  # forking the fpart partitioner
   # make sure there's no other fpart's running.
   my $fparts_already_running = `ps aux | grep 'fpar[t]'`; chomp $fparts_already_running;
   if ($fparts_already_running ne ''){
@@ -272,18 +275,19 @@ Hit [CTRL + C] to cancel or .. ";
     else {die "Fine - clear up the confusion and try again.\n"}
   }
   my $x = 0;
-  my $cmd = "fpart -v -L -s $FPARTSIZE_N -o $FP_ROOT $fnd2r  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
+  my $cmd = "fpart -v -L -z -s $FPARTSIZE_N -o $FP_ROOT $fnd2r  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
   # That captures the child PID!
-  if ($DEBUG) {print "DEBUG: fpart fork cmd:\n[$cmd]\n";}
-  if ($FPART_PID = fork) { print "\nINFO: Forking fpart..\nCheck [$FPART_LOGFILE] for errors if it hangs.\n"; }
-  else {
+  if ($DEBUG) {print "DEBUG: fpart fork cmd:\n[$cmd]\n";} sleep 5;
+  if ($FPART_PID = fork) {
+    if ($VERBOSE >= 2) { print "\nINFO: Forking fpart.  Check [$FPART_LOGFILE] for errors if it hangs.\n"; }
+  } else {
   system "$cmd";
   $FPART_PID = `cat $FP_PIDFILE`; chomp $FPART_PID;
   exit(0); # it's forked, now exit this stanza
   }
   # fpart has been forked; wait for enough chunkfiles to be written to start the rsyncs
   while (! -e $FP_PIDFILE) { sleep 1;
-    #print "INFO: Waiting for fpart to be forked..\n";
+    if ($VERBOSE >= 2) {print "INFO: Waiting for fpart to be forked..\n";}
   }
   $FPART_PID = `cat $FP_PIDFILE`; chomp $FPART_PID;
   my $ready2start = my $waitcnt = $NBR_FP_FLES = 0;
@@ -291,21 +295,24 @@ Hit [CTRL + C] to cancel or .. ";
   my $fp1 = $FP_ROOT . ".1";
   my $done = 0;
   while ($ready2start == 0) {
-    if (-e $fp0) { print "INFO: [$fp0] visible.\n"; $NBR_FP_FLES++; $ready2start=1; }
+    if (-e $fp0) {
+      if ($VERBOSE >= 2) {print "INFO: [$fp0] visible.\n";}
+      $NBR_FP_FLES++; $ready2start=1; 
+    }
     $waitcnt++;
-    print "INFO: Waiting [$waitcnt] s for chunk files to be written\r";
+    if ($VERBOSE >= 2) {print "INFO: Waiting [$waitcnt]s for chunk files to be written\n";}
     sleep 1;
   }
-} # forking the fpart partitioner
+#} # forking the fpart partitioner
 
 # start up NP rsyncs 1st, then cycle every CHECKPERIOD, checking # of rsyncs still going and
 # starting new ones as needed until the chunkfiles are exhausted.
 my $STILL_FP_CHUNKS = my $KEEPGOING = 1;
-my $FPCFS = $FP_ROOT . '.'; # FP Chunk File Stem
-my $NBR_FP_FLES = `ls -1 $FPCFS* | wc -l`; chomp $NBR_FP_FLES;
+my $FPCFS = "${FP_ROOT}."; # FP Chunk File Stem
+my $NBR_FP_FLES = `\\ls -U1 $FPCFS* | wc -l`; chomp $NBR_FP_FLES;
 $RSYNCS_GOING = $CUR_FPI = 0; # $CUR_FPI = current FP index
 
-print "\nINFO: Starting the 1st [$NP] rsyncs ..\n";
+if ($VERBOSE >= 2) {print "\nINFO: Starting the 1st [$NP] rsyncs ..\n";}
 my $sc = 0;
 while ($RSYNCS_GOING < $NP && $KEEPGOING) { #
   $CUR_FP_FLE = $FP_ROOT . "." . $CUR_FPI ; # the current fp chunkfile
@@ -327,35 +334,37 @@ while ($RSYNCS_GOING < $NP && $KEEPGOING) { #
       # so if it's done, then we're done.  No more chunk files, so no more rsyncs to start.
       $KEEPGOING = 0; # signal the while loop to break.
     } else { # fpart is still going so wait for the next fpart chunkfile to be finished.
-      print "INFO: waiting [$sc]s for next chunkfile [$CUR_FP_FLE]\r"; sleep 2; $sc += 2;
+      if ($VERBOSE >= 2) {print "INFO: waiting [$sc]s for next chunkfile [$CUR_FP_FLE]\r";} sleep 2; $sc += 2;
     }
   }
 }  #while ($RSYNCS_GOING < $NP && $KEEPGOING)
-print "\n\n";
 
 # so at this point either we've loaded all the rsyncs up to NP or we've completely finished.
 # If the latter, say good bye.  If the former, then we have to keep launching
 # rsyncs up to NP until we've used up all the fpart chunkfiles.
 
 $sPIDs = ""; # running PIDs launched by parsync, suspended PIDs (strings)
-$NBR_FP_FLES = `ls -1 $FPCFS* | wc -l`; chomp $NBR_FP_FLES; # get current # of chunks
+$NBR_FP_FLES = `\\ls -U1 $FPCFS* | wc -l`; chomp $NBR_FP_FLES; # get current # of chunks
 my @aprPIDs; # all recorded parsyncfp rsync PIDs ever started
 my @crrPIDs; # currently RUNNING parsyncfp rsync PIDs.
 my @csrPIDs; #currently SUSPENDED parsyncfp rsync PIDs.
 
 ### FOLLOWING IS THE MAIN PARSYNC-FPART LOOP
-if ($REUSECACHE) {$FP_RUNNING = 0;}
-else { $FP_RUNNING = `ps aux | grep $FPART_PID | grep fpar[t] | wc -l`; chomp $FP_RUNNING;}
+$FP_RUNNING = `ps aux | grep $FPART_PID | grep fpar[t] | wc -l`; chomp $FP_RUNNING;
 
 $ cyclecnt = 0;
+if ($VERBOSE == 1) {           printf "\n                   |   1m   |   MB/s   | Running || Susp'd  |
+     Timestamp     |  Load  | [wlp3s0] |   PIDs  ||  PIDs   | Chunks \n";}
 
 while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
   $rPIDs = "";
   # print the header
   if ($hdr_cnt > $hdr_rpt) {
     my $glob = $FP_ROOT . "*"; $hdr_cnt = 0;
-    $nbr_cur_fpc_fles = `ls -1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
-    print "     Timestamp       |  1m Load  | MB/s [$NETIF]   |  Running PIDs || Susp'd PIDs || Chunk [$CUR_FPI] of [$nbr_cur_fpc_fles]\n";
+    $nbr_cur_fpc_fles = `\\ls -U1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
+    # if ($VERBOSE >= 1) {print "     Timestamp       | 1m Load | MB/s [$NETIF] | Running PIDs || Susp'd PIDs    Chunks      \n";}
+     if ($VERBOSE > 1) {print "                   |   1m   |   MB/s   | Running || Susp'd  |
+     Timestamp     |  Load  | [wlp3s0] |   PIDs  ||  PIDs   | Chunks \n";}
   }
   ($rPIDs, $crr) = get_rPIDs($PIDFILE, $sPIDs);
 
@@ -395,8 +404,14 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
     my $o2_bytes = `netstat -bi | grep $myIP | awk '{print \$10}'`;
     $avgsend = ($o2_bytes - $o1_bytes) / $CHECKPERIOD / 1000000;
   }
-    printf "$rDATE     %5.2f   %12.2f             [%d]    ||     [%d] \n",
-             $SYSLOAD[0],   $avgsend ,   $NrPIDs, $NsPIDs;
+  # this should switch from scrolling to overwrite when VERBOSE < 2
+    if ($VERBOSE == 1) {
+      printf "$rDATE  %5.2f  %9.2f       %2d   <>   %2d      [%d] of [%d]\r",
+      $SYSLOAD[0],   $avgsend ,   $NrPIDs, $NsPIDs, $CUR_FPI, $nbr_cur_fpc_fles;
+    }
+   
+    if ($VERBOSE >= 2) {printf "$rDATE  %5.2f  %9.2f       %2d   <>   %2d      [%d] of [%d]\n",
+             $SYSLOAD[0],   $avgsend ,   $NrPIDs, $NsPIDs, $CUR_FPI, $nbr_cur_fpc_fles;}
   if ($DEBUG) {print "\nDEBUG: rPIDs = $rPIDs; sPIDs = $sPIDs\n";}
   $cyclecnt = 0; $hdr_cnt++;
   }
@@ -430,7 +445,7 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
 	$rPIDs =~ s/$raPIDs[$e]//g; # only then delete that PID fr the rPID string
       }
     } else { # there aren't any more PIDs left - all done or killed off.'
-      print "\tINFO: No more running rsync PIDs left [$rPIDs].  All rsyncs are suspended [$sPIDs].\n";
+      if ($VERBOSE >= 2) {print "\tINFO: No more running rsync PIDs left [$rPIDs].  All rsyncs are suspended [$sPIDs].\n";}
     }
   } elsif ($sPIDs =~ /\d+/) { # if there are sPIDs, unsuspend them one by one
     # split em
@@ -449,14 +464,13 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
     if ($REUSECACHE) {$FPART_RUNNING = 0;}
     else { $FPART_RUNNING = `ps aux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;}
     while (! -e $CUR_FP_FLE && $FPART_RUNNING eq '1'){
-      print "INFO: Waiting [$cfw] s for next chunkfile..\r"; sleep 2; $cfw += 2;
+      if ($VERBOSE >= 2) {print "INFO: Waiting [$cfw] s for next chunkfile..\r"; sleep 2; $cfw += 2;}
     }
-    
     ($rPIDs, $crr) = get_rPIDs($PIDFILE, $sPIDs);
     my $n = my @a = split(/\s+/, $rPIDs);
     my $R2SU = $NP - $n; # this is the number of rsyncs to start up
     $glob = $FP_ROOT . "*";
-    my $nbr_cur_fpc_fles = `ls -1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
+    my $nbr_cur_fpc_fles = `\\ls -U1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
     # $fparts_already_running will be '' if it's finished running.
     my $fparts_already_running = `ps aux | grep 'fpar[t]'`; chomp $fparts_already_running;
     # Check this more carefully for exceptions - this is the drop-dead error point
@@ -467,27 +481,27 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
 
         if ($rPIDs eq "" && $sPIDs eq "" && $CUR_FPI >= $nbr_cur_fpc_fles && $FPART_RUNNING == 0){
             # then we're done - exit.
-            print "\nINFO: Done.  Please check the target to make sure 
-  expected files are where they're supposed to be. \n";
+            if ($VERBOSE >= 2) {print "\nINFO: Done.  Please check the target to make sure 
+  expected files are where they're supposed to be. \n";}
             
             # remind user how much storage the cache takes and to clear the cache files 
             my $du_cache = `du -sh $parsync_dir`; chomp $du_cache;
-            print "
-WARN: The parsyncfp cache dir takes up [$du_cache]
+            if ($VERBOSE >= 2) {print "
+INFO: The parsyncfp cache dir takes up [$du_cache]
     Don't forget to delete it, but wait until you are sure that your job
-    completed correctly, so that you can re-use it if necessary.\n";
+    completed correctly, so you don't need the log files anymore.\n";}
             exit;
         }
         while  (($CUR_FPI >= $nbr_cur_fpc_fles) && $fparts_already_running ne '') {
-            print "DEBUG: CUR_FPI=$CUR_FPI >= nbr_cur_fpc_fles=$nbr_cur_fpc_fles?\n";
-            print "INFO: Waiting for fpart to get ahead of the transfer..\r"; 
-            $nbr_cur_fpc_fles = `ls -1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
+            if ($DEBUG) {print "DEBUG: CUR_FPI=$CUR_FPI >= nbr_cur_fpc_fles=$nbr_cur_fpc_fles?\n";}
+            if ($VERBOSE >= 2) {print "INFO: Waiting for fpart to get ahead of the transfer..\r"; }
+            $nbr_cur_fpc_fles = `\\ls -U1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
             $fparts_already_running = `ps aux | grep 'fpar[t]'`; chomp $fparts_already_running;
             sleep 2;
         }
         $logfile = $parsync_dir . '/' ."rsync-logfile-" . $DATE . "_" . $CUR_FPI;
         $CUR_FP_FLE = $FP_ROOT . "." . $CUR_FPI ; # generate the next fpart chunk file with $CUR_FPI
-        $nbr_cur_fpc_fles = `ls -1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
+        $nbr_cur_fpc_fles = `\\ls -U1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
         $RSYNC_CMD = "rsync  --bwlimit=$MAXBW -a --log-file=$logfile $RSYNCOPTS  --files-from=$CUR_FP_FLE  $ROOTDIR  $TARGET & echo \"\${!}\" >> $PIDFILE";
         if ($DEBUG) {print "\nDEBUG: Starting [$RSYNC_CMD]\n"; }
 
@@ -495,7 +509,7 @@ WARN: The parsyncfp cache dir takes up [$du_cache]
         # OR keep cycling continuously on a 1s loop and ONLY print out info every X cycles.  This is the easiest way. 
         if (-e $CUR_FP_FLE) {
             fixfilenames($CUR_FP_FLE, $ROOTDIR);  # check & fix for spaces, bad chars.
-            print "\tINFO: next chunk [", ($CUR_FPI+1), "] of [$nbr_cur_fpc_fles]\n";
+            if ($VERBOSE >= 2) {"\tINFO: next chunk [", ($CUR_FPI+1), "] of [$nbr_cur_fpc_fles]\n";}
             system("$RSYNC_CMD"); # capture the bg job PID to PIDfile
             $CUR_FPI++;
         }
@@ -503,13 +517,29 @@ WARN: The parsyncfp cache dir takes up [$du_cache]
     ($rPIDs, $crr) = get_rPIDs($PIDFILE, $sPIDs);
   }
   sleep 1;
-  $NBR_FP_FLES = `ls -1 $FPCFS* | wc -l`; chomp $NBR_FP_FLES; # get current # of chunks
+  $NBR_FP_FLES = `\\ls -U1 $FPCFS* | wc -l`; chomp $NBR_FP_FLES; # get current # of chunks
   if ($rPIDs =~ /\d+/) {$STILLRSYNCS = 1;}
   else {$STILLRSYNCS = 0;}
 }  # while ($CUR_FPI < $NBR_FP_FLES )
 
 my $host = `hostname`;
 if (defined $EMAIL){system("echo 'all rsyncs done' | mail -s 'parsyncfp on host [$host] completed' $EMAIL");}
+
+if ($VERBOSE >= 2) {print ".. and finally disposing of the cache...";}
+# and based on --disposal, (=c(ompress), =d(elete) =l(eave untouched)  all the chunk files.
+if ($DISPOSE =~ /d/) { system("\\rm -rf ${FP_ROOT_DIR}/f*"); }
+elsif ($DISPOSE =~ /c/ ) { # can it just be put into background?
+  $cmd="tar --remove-files -czf ${parsync_dir}/fpcache_${DATE}.tar.gz ${FP_ROOT_DIR} &";
+  #print "final tar cmd: [$cmd] \n";
+  system ("$cmd");
+} elsif ($VERBOSE >=2 ) {
+  print "INFO: Your cache files have been left intact in [${FP_ROOT_DIR}]. 
+  Please dispose of them as you see fit.";
+}
+
+if ($VERBOSE >=1) {
+  print "Thanks for using parsyncfp. Tell me how to make it better
+  <hjmangalam\@gmail.com>\n";}
 exit;
 
 
@@ -685,7 +715,6 @@ sub usage {
   my $helptxt = <<HELP;
 
 $PARSYNCVER
-
 The only native rsync option that parsyncfp uses is '-a (archive).  If you
 need more, then it's up to you to provide them ALL via '--rsyncopts'.
 parsyncfp checks to see if the current system load is too heavy and tries
@@ -694,7 +723,7 @@ to throttle the rsyncs during the run by monitoring and suspending
 
 parsyncfp uses fpart <http://goo.gl/K1WwtD> to create chunkfiles for rsync
 to read, bypassing the need to wait for a complete recursive scan. ie, it 
-starts the transfer immediately. For large, deep trees, this cna be useful.
+starts the transfer immediately. For large deep trees, this can be useful.
 
 It appropriates rsync's bandwidth throttle mechanism, using '--maxbw'
 as a passthru to rsync's 'bwlimit' option, but divides it by NP so
@@ -719,14 +748,12 @@ It only works on dirs and files that originate from the current dir (or
 specified via "--startdir").  You cannot include dirs and files from
 discontinuous or higher-level dirs.  parsyncfp also does not use rsync's 
 sophisticated/idiosyncratic treatment of trailing '/'s to direct where 
-files vs dirs are sent; dirs are treated as dirs regardless of the '/'.
-
+files vs dirs are sent; dirs are treated as dirs regardless of the 
+trailing '/'.
 
 ** the [.parsyncfp] files **
-The [.parsyncfp] dir contains the cache dir (fpcache), and the
-time-stamped log files. The cache files can be re-used with '--reusecache'
-(which will re-use ALL the chunk files.  The log files are datestamped and
-are not NOT overwritten.
+The [.parsyncfp] dir contains the cache dir (fpcache), and the time-
+stamped log files, which are not NOT overwritten.
 
 ** Odd characters in names **
 parsyncfp will refuse to transfer some oddly named files (tho it should copy
@@ -741,20 +768,26 @@ OPTIONS
 [s] = "quoted string"
 ( ) = the default if any
 
---NP [i] (sqrt(#CPUs)) ................  number of rsync processes to start
-       optimal NP depends on many vars.  Try the default and incr as needed
---startdir [s] (`pwd`)  ....................  the directory it starts at(*)
---maxbw [i] (unlimited) ..........  in KB/s max bandwidth to use (--bwlimit
+--NP|np [i] (sqrt(#CPUs)) ..............  number of rsync processes to start
+       optimal NP depends on many vars.   Try the default and incr as needed
+--altcache|ac (~/.parsyncfp) ..... alternative cache dir for placing it on a
+                                          another FS or for running multiple 
+                                                   parsyncfps simultaneously
+--startdir|sd [s] (`pwd`)  ..................  the directory it starts at(*)
+--maxbw [i] (unlimited) ...........  in KB/s max bandwidth to use (--bwlimit
        passthru to rsync).  maxbw is the total BW to be used, NOT per rsync.
---maxload [f] (NP+2)  .............  max system load - if sysload > maxload,
-                                                sleeps an rsync proc for 10s
---chunksize [s] (10G) ... aggregate size of the files allocated to one rsync
+--maxload|ml [f] (NP+2)  ..........  max system load - if sysload > maxload,
+                                            an rsync proc will sleep for 10s
+--chunksize|cs [s] (10G) .... aggregate size of files allocated to one rsync
                       process.  Can specify in 'human' terms [100M, 50K, 1T]
-                      as well as integer bytes.
---rsyncopts [s]  ....  options passed to rsync as a quoted string (CAREFUL!)
-	 this opt triggers a pause before executing to verify the command(+)
---interface [s]  ........  network interface to monitor (not use; see above)
---reusecache  ..........  don't re-read the dirs; re-use the existing caches
+                                                   as well as integer bytes.
+--rsyncopts|ro [s]  ...  options passed to rsync as quoted string (CAREFUL!)
+         this opt triggers a pause before executing to verify the command(+)
+--interface|i [s]  ......  network interface to monitor (not use; see above)
+--checkperiod|cp [i] (5) ........ sets the period in seconds between updates
+--verbose|v [0-3] (2) ...sets chattiness. 3=debug; 2=normal; 1=less; 0=none
+                    This only affects verbosity post-start; warning & error
+                    messages will still be printed.
 --email [s]  .....................  email address to send completion message
 --nowait  .............  for scripting, sleep for a few s instead of pausing
 --version  .................................  dumps version string and exits
@@ -800,7 +833,7 @@ where
   It uses 3 instances to rsync *.txt from the current dir to "/mount/backups/txt".
 
 
-(Good example)
+(Good example 1)
 parsyncfp   --checkperiod 6  --NP 3 --interface eth0  --chunksize=87682352 \
    --rsyncopts="--exclude='[abc]*'"  nacs/fabio   hjm\@moo:~/backups
 
@@ -815,6 +848,16 @@ based on regexes (note the quoting)
 nacs/fabio - shows that you can specify subdirs as well as top-level dirs (as
 long as the shell is positioned in the dir above, or has been specified via
 '--startdir'
+
+(Good example 2)
+parsyncfp -v 1 --nowait --ac pfpcache1 --NP 4 --cp=5 --cs=50M --ro '-az'  \
+linux-4.8.4 moo:~/test
+
+The above command shows:
+- short version of several options (-v for --verbose, --cp for checkperiod, etc)
+- shows use of --altcache (--ac pfpcache1), writing to relative dir pfpcache1
+- again shows use of --rsyncopts (--ro '-az') indicating 'archive' & compression'.
+- includes '--nowait' to allow unattended scripting of parsyncfp
 
 
 (Error Example)
@@ -836,6 +879,9 @@ The correct version of the above command is:
 % parsyncfp --NP=4  --startdir=/usr  local  /media/backupdisk
 
 HELP
+
+#--reusecache  ..........  don't re-read the dirs; re-use the existing caches
+
 
   print HLP $helptxt;
   close HLP;
