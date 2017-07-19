@@ -1,6 +1,14 @@
 # parsyncfp
 a parallel rsync wrapper in Perl
 
+## Changes
+- made it variably verbose (--verbose)
+- adjusted ending conditions to be accurate
+- some code cleanup.  getting there.
+- added checks for multihomed devices.
+
+
+
 ## Background
 
 parsyncfp (pfp) is the offspring of my [parsync](https://github.com/hjmangalam/parsync) 
