@@ -14,7 +14,7 @@ use File::Path qw(remove_tree);
 # git push                          # pushes the commit to github
 
 # after significant changes, update the tarball and cp to moo for distribution; update the github
-# cd ; cp ~/bin/parsyncfp ~/parsync/; tar -cvzf parsync+utils.tar.gz parsync; scp parsync+utils.tar.gz moo:~/public_html/parsync ; 
+# cd ; cp ~/bin/parsyncfp ~/parsyncfp/; tar -cvzf parsyncfp+utils.tar.gz parsyncfp; scp parsyncfp+utils.tar.gz moo:~/public_html/parsync ; 
 # cd ~/gits/parsyncfp; cp ~/bin/parsyncfp .; git add parsyncfp README.md; git commit -m 'commit message'; git push
 
 # TODO
@@ -59,7 +59,7 @@ $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
 );
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.44 (beta)
+parsyncfp version 1.45 (beta)
 July 16, 2017
 by Harry Mangalam <hjmangalam\@gmail.com> || <harry.mangalam\@uci.edu>
 
@@ -75,7 +75,7 @@ if (! @ARGV) {usage();} # in case someone doesn't know what to do.
 
 
 &GetOptions(
-  "startdir|sd"      =>   \$ROOTDIR,     # Have to be able to set rootdir -> SRC in rsync
+  "startdir|sd=s"    =>   \$ROOTDIR,     # Have to be able to set rootdir -> SRC in rsync
   "altcache|ac=s"    =>   \$ALTCACHE,    # alternative cache instead of ~/.parsyncfp
   "rsyncopts|ro=s"   =>   \$RSYNCOPTS,   # passthru to rsync as a string
   "NP|np=i"          =>   \$NP,          # number of rsync processes to start
