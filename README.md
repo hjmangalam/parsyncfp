@@ -19,7 +19,7 @@ chunk by chunk basis.  This allows pfp to begin transferring files before the
 complete recursive descent of the source dir is complete.  This feature can save many 
 hours of prep time on very large dir trees.
 
-pfp is primarily tested on Linux, but is being ported to MaccOSX
+pfp is primarily tested on Linux, but is being ported to MacOSX
 as well. (parsync seems to work on MacOSX, but the 'fp' variant is a bit behind.)
 
 pfp needs to be installed only on the SOURCE end of the 
