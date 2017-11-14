@@ -2,6 +2,15 @@
 a parallel rsync wrapper in Perl
 
 ## Changes
+
+### 1.47
+- changed format of output to add elapsed time, changed date format
+- code cleanup
+- fixed bandwidth speed calculation
+- updated help and fixed some inaccuracies for latest version.
+- added (declinable) scripted mod to ~/.ssh/config to reduce ssh warnings
+
+### 1.46
 - made it variably verbose (--verbose)
 - adjusted ending conditions to be accurate
 - some code cleanup.  getting there.
@@ -20,7 +29,7 @@ complete recursive descent of the source dir is complete.  This feature can save
 hours of prep time on very large dir trees.
 
 pfp is primarily tested on Linux, but is being ported to MacOSX
-as well. (parsync seems to work on MacOSX, but the 'fp' variant is a bit behind.)
+as well. 
 
 pfp needs to be installed only on the SOURCE end of the 
 transfer and only works in local SOURCE -> remote TARGET mode 
@@ -128,28 +137,8 @@ where:
 
 It uses 4 instances to rsync dir1 dir2 dir3 to hjm@remotehost:~/backups
 
-###  Good Example 2
-```
-% parsyncfp --rsyncopts="-a -s --ignore-existing" --reusecache  --NP=3 --barefiles  *.txt   /mount/backups/txt
-```
 
-where
--  "--rsyncopts='-a -s --ignore-existing'" are options passed to rsync
-     telling it not to disturb any existing files in the target directory.
-     '-a -s' are included bc use of --rsyncopts implies that the user
-     defines ALL rsync options ('-a -s are default values, but blanked by
-     the use of '--rsyncopts').
-- "--reusecache" indicates that the filecache shouldn't be re-generated,
-    uses the previous filecache in ~/.parsyncfp
-- "--NP=3" for 3 copies of rsync (with no "--maxload", the default is 4)
-- "--barefiles" indicates that it's OK to transfer barefiles instead of
-    recursing thru dirs.
-- "/mount/backups/txt" is the target - a local disk mount instead of a network host.
-
-It uses 3 instances to rsync *.txt from the current dir to "/mount/backups/txt".
-
-
-### Good Example 3
+### Good Example 2
 
 ```
 parsyncfp   --checkperiod 6  --NP 3 --interface eth0  --chunksize=87682352 
@@ -168,7 +157,7 @@ based on regexes (note the quoting)
 long as the shell is positioned in the dir above, or has been specified via
 '--startdir'
 
-### Good Example 4
+### Good Example 3
 
 ```
 parsyncfp -v 1 --nowait --ac pfpcache1 --NP 4 --cp=5 --cs=50M --ro '-az'  
