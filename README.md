@@ -3,6 +3,19 @@ a parallel rsync wrapper in Perl
 
 ## Changes
 
+### 1.50
+- fixed Ken Bass' bug where trimming dir name was not constrained to front
+   of the string and could lead to problems if dir was names something like
+   '/data/rna/hjm/rnaseq/data/something/version/data/smith'
+   if the leading name was '/data/' the condensed, trimmed dir was 
+   changed to
+   'rna/hjm/rnaseq/something/version/smith' ie removal of ALL 'data/'
+- fixed finding top level targets with embedded spaces - had to trim spaces
+   and escape filenames going into fpart.
+- many verbosity fixes
+- some changes to ending text to reference both rsync and fpart logs 
+
+
 ### 1.47
 - changed format of output to add elapsed time, changed date format
 - code cleanup

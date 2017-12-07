@@ -11,7 +11,7 @@ use File::Path qw(remove_tree);
 # copy to all the local hosts
 # scp $fn moo:~/public_html; scp $fn moo:~/bin;  scp $fn   dabrick:~/bin; ssh moo 'scp bin/parsyncfp hmangala@hpcs:~/bin'
 
-# don't forget!!  using git!
+# don't forget!!  using git!  Add changes to changelog in the README.md file
 # cd ~/gits/parsyncfp; cp ~/bin/parsyncfp .; git add parsyncfp README.md; git commit -m 'commit message'; git push
 # check github for bug reports.
  
