@@ -16,12 +16,14 @@ use File::Path qw(remove_tree);
 # check github for bug reports.
  
 # TODO
-# - check for fpart before running.
-# - test for '-d' or --delete' in the rsyncopts line and refer to problem with this.
-# - test for # of chunk files generated.  Don't assume a large # or even the same # as the NP #.
-# - decouple the cycle time from the job start time. ie, keep monitoring the exit codes
+# - [x] done: check for fpart before running.
+# - [x] done: test for '-d' or --delete' in the rsyncopts line and refer to problem with this.
+# - test for # of chunk files generated.  emit warnings if goes above 2000 (admise to choose 
+#    a larger chunksize; or if less than NP. Don't assume a large # or even the same # as the NP #.
+# - [x] done: decouple the cycle time from the job start time. ie, keep monitoring the exit codes
 # and launch the next rsync immediately, don't wait for the checkperiod cycle, since that could be 
 # quite long
+# - handle immediate, top-level dirs 
 
 
 use vars qw($allPIDs $ALL_SYS_RSYNC_PIDS $ch $CHECKPERIOD $cmd 
@@ -38,8 +40,8 @@ $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
 );
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.48 (Ken Bass Edition)
-Dec 6th, 2017
+parsyncfp version 1.50 (Ken Bass Edition)
+Dec 7th, 2017
 by Harry Mangalam <hjmangalam\@gmail.com> || <harry.mangalam\@uci.edu>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -73,6 +75,7 @@ if (! @ARGV) {usage();} # in case someone doesn't know what to do.
 );
 
 ## Set up run-permanent variables.
+
 $DATE=`date +"%T_%F" | sed 's/:/./g' `; chomp $DATE;
 if (! defined $ALTCACHE) {$parsync_dir = $HOME . "/.parsyncfp";}
 else {$parsync_dir = $ALTCACHE; mkdir $parsync_dir;}
@@ -84,6 +87,10 @@ $DFLT_RSYNCOPTS = "-a -s"; # the default options to pass to rsync; blanked if de
 if (defined $VERSION) { print $PARSYNCVER; exit;}
 if (!defined $CHECKPERIOD) {$CHECKPERIOD = 3;}
 if (!defined $VERBOSE) {$VERBOSE = 2;}
+
+my $fpcheck = `which fpart`;
+if ($fpcheck eq "") {die "\nFATAL: There's no 'fpart' executable on your PATH. Did you install it?
+See: https://github.com/martymac/fpart/blob/master/README\n";}
 
 if (!defined $RSYNCOPTS) {$RSYNCOPTS = ""; $DFLT_RSYNCOPTS = "-a -s";}
 else {  # if def $RSYNCOPTS, then user takes all responsibility
@@ -105,7 +112,6 @@ to run parsyncfp. 'fpsync' DOES provide support for a parallel '--delete',
 and the author provides a good explanation as to how he does this here:
 <https://goo.gl/dtwp3P>
 ";
-        
     }
 } 
 
@@ -202,11 +208,10 @@ if (-d $parsync_dir) {
         If you specified '--nowait', cache will be cleared in 3s regardless.
   Otherwise, hit [Enter] and I'll clear them.
 LS
-}
-
-$glob = "${FP_ROOT_DIR}/f*";
+  }
+  $glob = "${FP_ROOT_DIR}/f*";
   if ($NOWAIT){ sleep 3;}
-  else {pause();}
+  elsif ($VERBOSE > 0) {pause();}
   system("rm -f $glob");
   if ($VERBOSE >=2 ) {print "INFO: The fpart chunk files [$glob] are cleared.. continuing\n";}
 } elsif (! -d $parsync_dir) {
@@ -236,7 +241,11 @@ if (!defined $dirtmp) { $dirtmp = `pwd`;}
 while (defined $dirtmp) { # should work on explicitly named dirs as well as globs.
   $dirtmp = $ROOTDIR . '/' . $dirtmp;
   if (! -r $dirtmp){ # quick check to see if its readable.
-    print "WARN: [$dirtmp] isn't readable; either it's not where you think it\nis or you need to escalate your privs.  Regardless, it won't be transferred in this run.\n";
+    print "\nWARN: [$dirtmp] isn't readable; 
+    either it's not where you think it is or you need to escalate your privs.  
+    Regardless, it won't be transferred in this run.\n\n";
+    if ($NOWAIT){ sleep 3;}
+    elsif ($VERBOSE > 0) {pause();}
   } else {  # otherwise, add the file to list to be chunked and  transferred.
     $fnd2r .= $dirtmp . " ";
   }
@@ -259,11 +268,12 @@ if ($ansr =~ /[yY]/) { print "\nOK, continuing\n"; }
 else {die "Fine - clear up the confusion and try again.\n"}
 }
 my $x = 0;
-my $cmd = "fpart -v -L -z -s $FPARTSIZE_N -o $FP_ROOT $fnd2r  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
-# That captures the child PID!
+$fnd2r =~ s/^\s+|\s+$//g ; # trim leading and trailing
+$fnd2r =~ s/ /\\ /g; # subs internal spaces with escaped spaces
+my $cmd = "fpart -v -L -z -s $FPARTSIZE_N -o $FP_ROOT $fnd2r  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE"; # captures the child PID!
 if ($DEBUG) {print "DEBUG: fpart fork cmd:\n[$cmd]\n";} sleep 5;
-if ($FPART_PID = fork) {
-if ($VERBOSE >= 2) { print "\nINFO: Forking fpart.  Check [$FPART_LOGFILE] for errors if it hangs.\n"; }
+if ($FPART_PID = fork) { # this actually takes a couple of seconds 
+    if ($VERBOSE >= 2) { print "\nINFO: Forking fpart.  Check [$FPART_LOGFILE] for errors if it hangs.\n"; }
 } else {
 system "$cmd";
 $FPART_PID = `cat $FP_PIDFILE`; chomp $FPART_PID;
@@ -340,7 +350,7 @@ my $IFN = sprintf("%7s",$NETIF);
 
 my $day =`date +"%F"`; chomp $day;
 
-if ($VERBOSE == 1) {
+if ($VERBOSE == 0) {
     print "        | Elapsed |   1m   |    MB/s   | Running || Susp'd  |      Chunks       [$day]
   Time  | time(m) |  Load  | [$IFN] |   PIDs  ||  PIDs   | [UpTo] of [ToDo]\n";
 }
@@ -405,9 +415,10 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
   
   # this should switch from scrolling to overwrite when VERBOSE < 2
   # print out the line
-  printf "%8s   %5.2f    %5.2f  %9.2f       %2d    <>  %2d          [%d] of [%d]",
+  if ($VERBOSE > 0) {
+    printf "%8s   %5.2f    %5.2f  %9.2f       %2d    <>  %2d          [%d] of [%d]",
   $rDATE, $el_min, $SYSLOAD[0],   $avgsend ,   $NrPIDs, $NsPIDs, $CUR_FPI, $nbr_cur_fpc_fles;  
-  
+  }
   # and then over-write it or add a newline for scrolling data.
   if ($VERBOSE == 1) { printf "\r";}
   elsif ($VERBOSE >= 2) {printf "\n";}
@@ -488,7 +499,15 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
             if ($VERBOSE >= 2) {print "
 INFO: The parsyncfp cache dir takes up [$du_cache]
     Don't forget to delete it, but wait until you are sure that your job
-    completed correctly, so you don't need the log files anymore.\n";}
+    completed correctly, so you don't need the log files anymore.
+    
+Reminder: check the parsyncfp log [$logfile]
+    and the fpart log [$FPART_LOGFILE] 
+    if there were errors. Use '--verbose=1' for less output.
+      
+      Thanks for using parsyncfp. Tell me how to make it better.
+                       <hjmangalam\@gmail.com>\n";
+            }
             exit;
         }
         while  (($CUR_FPI >= $nbr_cur_fpc_fles) && $fparts_already_running ne '') {
@@ -539,12 +558,13 @@ elsif ($DISPOSE =~ /c/ ) { # can it just be put into background?
   system ("$cmd");
 } elsif ($VERBOSE >=2 ) {
   print "\n\nINFO: Your cache files have been left intact in [${FP_ROOT_DIR}]. 
-  Please dispose of them as you see fit.";
+  Please dispose of them as you see fit.
+  
+  Reminder: check [$FPART_LOGFILE] for errors if there were errors.
+  
+  Thanks for using parsyncfp. Tell me how to make it better.
+  <hjmangalam\@gmail.com>\n";
 }
-
-if ($VERBOSE >=1) {
-  print "\n\nThanks for using parsyncfp. Tell me how to make it better
-  <hjmangalam\@gmail.com>\n";}
 exit;
 
 
@@ -561,7 +581,7 @@ sub check_utils {
   foreach my $util (keys %UTILS){
     my $utilpath = `which $util | tr -d '\n'`;
     if ($utilpath !~ /$util/){
-      print "!!WARN: [$util] not found.  you can 'fpart' here:
+      print "!!WARN: [$util] not found.  you can get 'fpart' here:
 	<http://moo.nac.uci.edu/~hjm/parsync/utils>
       and the rest via yum, apt-get, or google.\n";
       die "\n\nFATAL: [$util] isn't on your PATH [$PATH]; Please install it or correct your PATH variable to include it.\nTry ''module load perl'' or use cpan to install it.\n\n"
