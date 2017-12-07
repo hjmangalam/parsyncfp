@@ -13,26 +13,16 @@ use File::Path qw(remove_tree);
 
 # don't forget!!  using git!
 # cd ~/gits/parsyncfp; cp ~/bin/parsyncfp .; git add parsyncfp README.md; git commit -m 'commit message'; git push
+# check github for bug reports.
  
 # TODO
-
-# should decouple the cycle time from the job start time. ie, keep monitoring the exit codes
+# - check for fpart before running.
+# - test for '-d' or --delete' in the rsyncopts line and refer to problem with this.
+# - test for # of chunk files generated.  Don't assume a large # or even the same # as the NP #.
+# - decouple the cycle time from the job start time. ie, keep monitoring the exit codes
 # and launch the next rsync immediately, don't wait for the checkperiod cycle, since that could be 
 # quite long
 
-# check github for bug reports.
-
-# specification of sources
-# - compress/decompress chunk files when transiting them so they don't tak up too much space.
-# DONE - - use 'find . -name 'regex' ' to process lists of files rather than ls globbing.
-# still using ls, but as '\ls -U' - 10X faster.
-# see note from james Ziller about the faults he had:
-#               /usr/bin/ls: Argument list too long
-# https://goo.gl/lECBnP  & https://goo.gl/OomdIz
-# or use 'find .' unaliases any ls and doesn't sort the output, so it /very/ fast
-# DONE - when catching up to a previous rsync, should cycle fast until it's all 
-# caught up then drop back to regular periodicity. Maybe, regardless of 
-# requested cycle time, it cycles very fast for the 1st few to check that it's caught up?
 
 use vars qw($allPIDs $ALL_SYS_RSYNC_PIDS $ch $CHECKPERIOD $cmd 
 $crr $CUR_FP_FLE $CUR_FPI $DATE $dcnt $DEBUG @DIRS @DIRS2SYNC $dirtmp 
@@ -48,16 +38,16 @@ $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
 );
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.47 (beta)
-Nov 14, 2017
+parsyncfp version 1.48 (Ken Bass Edition)
+Dec 6th, 2017
 by Harry Mangalam <hjmangalam\@gmail.com> || <harry.mangalam\@uci.edu>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
 'rsync' to provide some load balancing and parallel operation across
 network connections to increase the amount of bandwidth it can use.
-The 'fp' variant uses 'fpart' <https://sourceforge.net/projects/fpart/> 
-to bypass the need for a full recursive descent of the dir trees before 
-the actual transfer starts.
+The 'fp' variant uses 'fpart' to bypass the need for a full recursive 
+descent of the dir trees before the actual transfer starts. 
+Do NOT try to use rsync --delete options'.  More help with '--help'
 VERSION
 
 if (! @ARGV) {usage();} # in case someone doesn't know what to do.
@@ -94,8 +84,31 @@ $DFLT_RSYNCOPTS = "-a -s"; # the default options to pass to rsync; blanked if de
 if (defined $VERSION) { print $PARSYNCVER; exit;}
 if (!defined $CHECKPERIOD) {$CHECKPERIOD = 3;}
 if (!defined $VERBOSE) {$VERBOSE = 2;}
+
 if (!defined $RSYNCOPTS) {$RSYNCOPTS = ""; $DFLT_RSYNCOPTS = "-a -s";}
-else {$DFLT_RSYNCOPTS = "";} # if def $RSYNCOPTS, then user takes all responsibility
+else {  # if def $RSYNCOPTS, then user takes all responsibility
+    $DFLT_RSYNCOPTS = "";
+    if ($RSYNCOPTS =~ / -d / || $RSYNCOPTS =~ / --del/){ # user tries to pass in a 'delete' option
+        print "\nWARN: It looks like you're trying to pass in a '--delete' option 
+in the '--rsyncopts' string.  [$RSYNCOPTS]
+Because parallel rsyncs don't know what the other rsyncs are doing, 
+'delete' options don't work well. If this is what you want to do, 
+omit that option here and follow the parsyncfp command with a regular 
+'rsync --delete' command.  It will be slower than a parallel 
+operation but since most of the action will be remote deletes, 
+it should be fairly fast.
+
+If the operation is to be performed on locally mounted filesystems 
+(not to remote nodes), I'd strongly recommend the 'fpsync' tool, which 
+you should have already received as part of the 'fpart' package necessary 
+to run parsyncfp. 'fpsync' DOES provide support for a parallel '--delete', 
+and the author provides a good explanation as to how he does this here:
+<https://goo.gl/dtwp3P>
+";
+        
+    }
+} 
+
 #if (defined $HELP ||  @ARGV == 0) { usage(); }
 if (defined $HELP) {usage($parsync_dir);}
 if (!defined $DISPOSE) {$DISPOSE = 'l';} # for leave untouched
@@ -290,7 +303,7 @@ while ($RSYNCS_GOING < $NP && $KEEPGOING) { #
     fixfilenames($CUR_FP_FLE, $ROOTDIR);  # check & fix for spaces, bad chars.
     # entire rsync command and PID capture (used in total of 2 places)
     $logfile = $parsync_dir . '/' ."rsync-logfile-" . $DATE . "_" . $CUR_FPI;
-    $RSYNC_CMD = "rsync  --bwlimit=$MAXBW  $RSYNCOPTS -as --log-file=$logfile --files-from=$CUR_FP_FLE  $ROOTDIR  $TARGET  & echo \"\${!}\" >> $PIDFILE";
+    $RSYNC_CMD = "rsync  --bwlimit=$MAXBW  $RSYNCOPTS -a -s --log-file=$logfile --files-from=$CUR_FP_FLE  $ROOTDIR  $TARGET  & echo \"\${!}\" >> $PIDFILE";
     # there will be as many logfiles as fp chunkfiles.
     # ie LOTS. but they can be deleted after the run has been verified..
     # TODO don't know if we need this logfile.
@@ -488,7 +501,7 @@ INFO: The parsyncfp cache dir takes up [$du_cache]
         $logfile = $parsync_dir . '/' ."rsync-logfile-" . $DATE . "_" . $CUR_FPI;
         $CUR_FP_FLE = "${FP_ROOT}.${CUR_FPI}" ; # generate the next fpart chunk file with $CUR_FPI
         $nbr_cur_fpc_fles = `\\ls -U1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
-        $RSYNC_CMD = "rsync  --bwlimit=$MAXBW -a --log-file=$logfile $RSYNCOPTS  --files-from=$CUR_FP_FLE  $ROOTDIR  $TARGET & echo \"\${!}\" >> $PIDFILE";
+        $RSYNC_CMD = "rsync  --bwlimit=$MAXBW -a -s --log-file=$logfile $RSYNCOPTS  --files-from=$CUR_FP_FLE  $ROOTDIR  $TARGET & echo \"\${!}\" >> $PIDFILE";
         if ($DEBUG) {print "\nDEBUG: Starting [$RSYNC_CMD]\n"; }
 
         # check status in a 1s loop checking to start extra rsyncs do we don't wait any more than 1s
@@ -659,24 +672,25 @@ sub debug($$) {
 
 # fixfilenames reads in a file of filenames and iterates over them, fixing their
 # names and emitting useful warning if something goes odd.
+#  called like: fixfilenames($CUR_FP_FLE, $ROOTDIR)
+# where $CUR_FP_FLE = current fpart file (fqpn)
+#       $ROOTDIR    = pwd, or where all additional dirs are rooted.
 sub fixfilenames {
   my $FN = shift;
-  my $startdir = shift; $startdir .= '/';
+  my $startdir = shift; $startdir .= '/'; # and suffxed with a '/'
+#  print "\nstartdir = $startdir\n";
   my $fpnew =  $FN . ".new";
   open (FP, "< $FN") or die "ERROR: Can't open fp file [$FN]\n.";
   open (FPN, "> $fpnew") or die "ERROR: Can't open replacement file [$fpnew]\n.";
-  my $lc = my $fws = my $verified = my $failed = 0;
+  my $lc = my $verified = my $failed = 0;
   while (<FP>) {
     chomp;
-      if ($_ =~ / /) {  # subst all spaces with '\ '
-	$fws++;  s/ /\ /g;
-      }
-      # and also delete off the startdir
-      s/$startdir//g;
-      print FPN "$_\n";
+    if ($_ =~ / /) { s/ /\ /g; }  # subst all spaces with '\ '
+    s/^$startdir//g;  # and also delete off the startdir (Thanks Ken Bass for the missing '^')
+    print FPN "$_\n";
   }
   close FP;  close FPN;
-rename $fpnew, $FN; # and then rename the new one to the original
+  rename $fpnew, $FN; # and then rename the new one to the original
 }
 
 
@@ -760,7 +774,6 @@ to be (pointlessly) shown.
 reasons still mysterious.  In such cases, I recommend the fpsync tool 
 contained in the fpart package above].
 
-
 It only works on dirs and files that originate from the current dir (or
 specified via "--startdir").  You cannot include dirs and files from
 discontinuous or higher-level dirs.  parsyncfp also does not use rsync's 
@@ -818,6 +831,27 @@ anywhere if given an existing startdir.
 (+) the '--rsyncopts' string can pass any rsync option to all the rsyncs that
 will be started.  This allows options like '-z' (compression) or '--exclude-from' 
 to filter out unwanted files. Use any 'delete' options carefully tho.
+
+Hints & Workarounds
+===================
+IMPORTANT: rsync '--delete' options will not work with '--rsyncopts' bc the 
+multiple parallel rsyncs that parsyncfp launches are independent and therefore 
+don't know about each other (and so cannot exchange info about what should
+be deleted or not.  Use a final 'rsync --delete' to clean up the transfer
+if that's your need.
+
+
+If you see an error related to "sh: /usr/bin/ls: Argument list too long", 
+it usually means that fpart has generated a huge list of chunkfiles (10s 
+of 1000s) and 'ls' has trouble processing that many.  This is usually
+due to pointing parsyncfp at a huge filesystem, with millions of files, 
+with a chunksize that's too small (resulting in the above-noted too many 
+chunkfiles). You can either increase the chunksize ('--chunksize=100G) 
+which will result in a smaller number of chunk files to process, or split 
+up the source dirs among multiple parsyncfps (which can be done using the 
+'--altcache' option above).
+
+
 
 Examples
 ========
