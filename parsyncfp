@@ -40,8 +40,8 @@ $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
 );
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.50 (Ken Bass Edition)
-Dec 7th, 2017
+parsyncfp version 1.51 (Ken Bass Edition)
+Jan 5th, 2017
 by Harry Mangalam <hjmangalam\@gmail.com> || <harry.mangalam\@uci.edu>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
