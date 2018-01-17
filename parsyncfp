@@ -70,7 +70,7 @@ if (! @ARGV) {usage();} # in case someone doesn't know what to do.
   "nowait|nw!"       =>   \$NOWAIT,      # sleep a few s rather than wait for a user ack
   "help!"            =>   \$HELP,        # dump usage, tips
   "version!"         =>   \$VERSION,     # duh..
-  "disposal|d=s"     =>   \$DISPOSE,     # what to do with the cache (compress, delete, leave untouched)
+  "dispose|d=s"     =>   \$DISPOSE,     # what to do with the cache (compress, delete, leave untouched)
   "debug|d!"         =>   \$DEBUG,       # developer-level info; (historical) alias for '-v 3'
 );
 
