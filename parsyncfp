@@ -4,7 +4,7 @@ use Getopt::Long;      # for std option handling: -h --yadda=badda, etc
 use Socket;
 use Env qw(HOME PATH);
 use File::Path qw(remove_tree);
-
+use Time::HiRes qw(sleep);
 
 # after significant changes, update the tarball and cp to moo for distribution; update the github
 # fn="/home/hjm/bin/parsyncfp"; cd ; cp  $fn ~/parsyncfp/; tar -cvzf parsyncfp+utils.tar.gz parsyncfp; scp parsyncfp+utils.tar.gz moo:~/public_html/parsync ; 
@@ -318,6 +318,7 @@ while ($RSYNCS_GOING < $NP && $KEEPGOING) { #
     # ie LOTS. but they can be deleted after the run has been verified..
     # TODO don't know if we need this logfile.
     if ($DEBUG) {&debug(__LINE__, "Complete rsync cmd = [$RSYNC_CMD]");}
+    sleep(rand(1.0));
     system("$RSYNC_CMD"); # launch rsync and capture the bg job PID to PIDfile
     $CUR_FPI++;
     $RSYNCS_GOING++;
