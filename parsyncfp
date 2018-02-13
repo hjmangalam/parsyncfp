@@ -16,6 +16,7 @@ use File::Path qw(remove_tree);
 # check github for bug reports.
  
 # TODO
+# - [x] done: fix bandwidth calculation subroutine.
 # - [x] done: check for fpart before running.
 # - [x] done: test for '-d' or --delete' in the rsyncopts line and refer to problem with this.
 # - test for # of chunk files generated.  emit warnings if goes above 2000 (admise to choose 
@@ -40,8 +41,8 @@ $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
 );
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.51 (Ken Bass Edition)
-Jan 5th, 2017
+parsyncfp version 1.52 (Ken Bass Edition)
+Feb 12th, 2018
 by Harry Mangalam <hjmangalam\@gmail.com> || <harry.mangalam\@uci.edu>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -110,7 +111,8 @@ If the operation is to be performed on locally mounted filesystems
 you should have already received as part of the 'fpart' package necessary 
 to run parsyncfp. 'fpsync' DOES provide support for a parallel '--delete', 
 and the author provides a good explanation as to how he does this here:
-<https://goo.gl/dtwp3P>
+<https://goo.gl/dtwp3P>.  HOWEVER!! Anytime you use '--delete' in an rsync 
+operation, MAKE SURE you know what you're doing.
 ";
     }
 } 
@@ -231,6 +233,11 @@ $TARGET = $ARGV[$#ARGV]; # remote rsync target
 if (!defined $TARGET ){die "\n\nXX FATAL XX: No target defined! Where you gonna put this stuff??!?\nTry $0 --help for the built-in help.\n"}
 $#ARGV--;
 
+if ($TARGET =~ /~/) {die "\n\tFATAL: You defined the target dir with a '~': [$TARGET]. 
+\tWhile this SHOULD work, it often doesn't so I'm going to force you to replace 
+\tit with an explicit remote path.  
+\tie instead of using '~/dir', please use '/home/<user>/dir.  Sorry. \n\n";}
+
 # now process the dirs
 $dcnt = 0;
 $fnd2r = "";  # zero the list of 'files 'n' dirs to rsync'
@@ -256,16 +263,16 @@ my @cachefiles = (); # will populate with list of cachefiles to process together
 
 my $fparts_already_running = `ps aux | grep 'fpar[t]'`; chomp $fparts_already_running;
 if ($fparts_already_running ne ''){
-print "WARN: one or more 'fpart's are already running:
-====
-[$fparts_already_running]
-====
-Unless you know that these fparts are valid and not left over from previous 
-parsyncfp's, you should exit and kill them off before restarting this run.
-Continue? [Ny] ";
-my $ansr = <STDIN>;
-if ($ansr =~ /[yY]/) { print "\nOK, continuing\n"; }
-else {die "Fine - clear up the confusion and try again.\n"}
+    print "WARN: one or more 'fpart's are already running:
+    ====
+    [$fparts_already_running]
+    ====
+    Unless you know that these fparts are valid and not left over from previous 
+    parsyncfp's, you should exit and kill them off before restarting this run.
+    Continue? [Ny] ";
+    my $ansr = <STDIN>;
+    if ($ansr =~ /[yY]/) { print "\nOK, continuing\n"; }
+    else {die "\nFine - clear up the confusion and try again.\n"}
 }
 my $x = 0;
 $fnd2r =~ s/^\s+|\s+$//g ; # trim leading and trailing
@@ -402,8 +409,8 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
 
   my $avgsend;
   if ($Linux) {
-    (my $avrecv, $avgsend) = getavgnetbw($NETIF); #,$CHECKPERIOD);
-    chomp $avgsend; $avgsend = ($avgsend / 1048576) / $CHECKPERIOD;
+    (my $avrecv, $avgsend) = getavgnetbw($NETIF, $CHECKPERIOD); 
+    chomp $avgsend; $avgsend = ($avgsend / 1048576);
   } else {
     if ($DEBUG) {print "DEBUG: netstat lines next with myIP=[$myIP]\n";}
     my $o1_bytes = `netstat -bi | grep $myIP | awk '{print \$10}'`; sleep $CHECKPERIOD;
@@ -444,10 +451,9 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
       if ($ra[$r] eq $sa[$s]) {$rPIDs =~ s/$ra[$r]//g;} # delete it from $rPIDs
       }
     }
-    # picks up both suspended and running PIDs
-    # and the new result has to have something in it as well.
+    # picks up both suspended and running PIDs and the new result has to have something in it as well.
     if ($rPIDs =~ /\d+/){ # if any still left
-      my $N = my @raPIDs = split(/\s+/, $rPIDs); my $e = 0; #@raPIDs = temp array to carry currently running PIDs
+      my $N = my @raPIDs = split(/\s+/, $rPIDs); my $e = 0; # @raPIDs = temp array to carry currently running PIDs
       while ($e <= $N && $raPIDs[$e] !~ /\d+/){$e++};
       if ($DEBUG) {print "\t\tDEBUG:got one: [$raPIDs[$e]]; will now suspend it\n";}
       kill 'STOP', $raPIDs[$e];
@@ -647,17 +653,16 @@ sub get_rPIDs($$) {
   return ($rpids, $crr);
 }
 
-sub getavgnetbw ($$) { # call as ($avrecv, $avgsend) = getavgnetbw($NETIF)
+sub getavgnetbw ($$) { # call as ($avrecv, $avgsend) = getavgnetbw($NETIF, $CHECKPERIOD)
     my ($avgrec,$avgtrans,$R1,$T1,$R2,$T2);
-    my $NETIF = shift; #my $CHECKPERIOD = shift;
-    my $file = shift;   #, my $reps = shift;
+    my $NETIF = shift; my $CHECKPERIOD = shift;
     $R1=`cat /sys/class/net/${NETIF}/statistics/rx_bytes`; 
     $T1=`cat /sys/class/net/${NETIF}/statistics/tx_bytes`;
     sleep $CHECKPERIOD;
     $R2=`cat /sys/class/net/${NETIF}/statistics/rx_bytes`; 
     $T2=`cat /sys/class/net/${NETIF}/statistics/tx_bytes`;
-    $avgrec = ($R2 - $R1);# / $CHECKPERIOD;
-    $avgtrans = ($T2 - $T1); # / $CHECKPERIOD;
+    $avgrec = ($R2 - $R1);
+    $avgtrans = ($T2 - $T1); 
     return ($avgrec, $avgtrans);
 }
 
