@@ -3,6 +3,10 @@ a parallel rsync wrapper in Perl
 
 ## Changes
 
+### 1.53 
+- removed internal space handling for target names since this interferes with multiple
+dir targets.  Have to re-think this.
+
 ### 1.50
 - fixed Ken Bass' bug where trimming dir name was not constrained to front
    of the string and could lead to problems if dir was names something like
