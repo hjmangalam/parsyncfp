@@ -9,13 +9,15 @@ use File::Path qw(remove_tree);
 # after significant changes, update the tarball and cp to moo for distribution; update the github
 # fn="/home/hjm/bin/parsyncfp"; cd ; cp  $fn ~/parsyncfp/; tar -cvzf parsyncfp+utils.tar.gz parsyncfp; scp parsyncfp+utils.tar.gz moo:~/public_html/parsync ; 
 # copy to all the local hosts
-# scp $fn moo:~/public_html; scp $fn moo:~/bin;  scp $fn   dabrick:~/bin; ssh moo 'scp bin/parsyncfp hmangala@hpcs:~/bin'
+# scp $fn moo:~/public_html; scp $fn moo:~/bin;  scp $fn   dabrick:~/bin; ssh -t moo 'scp bin/parsyncfp hmangala@hpcs:~/bin'
 
 # don't forget!!  using git!  Add changes to changelog in the README.md file
 # cd ~/gits/parsyncfp; cp ~/bin/parsyncfp .; git add parsyncfp README.md; git commit -m 'commit message'; git push
 # check github for bug reports.
  
 # TODO
+# - check that fpart can generate at least the # of chunk that are > than NP (as below)
+# - port to MacOSX using hackintosh
 # - [x] done: fix bandwidth calculation subroutine.
 # - [x] done: check for fpart before running.
 # - [x] done: test for '-d' or --delete' in the rsyncopts line and refer to problem with this.
@@ -41,8 +43,8 @@ $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
 );
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.52 (Ken Bass Edition)
-Feb 12th, 2018
+parsyncfp version 1.54 
+June 28th, 2018
 by Harry Mangalam <hjmangalam\@gmail.com> || <harry.mangalam\@uci.edu>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -150,7 +152,6 @@ if (! defined $NETIF) {
     my $ifs = `/sbin/route -n | grep "^0.0.0.0" | awk '{print \$8}' | wc -l`; chomp $ifs;
     $NETIF = `/sbin/route -n | grep "^0.0.0.0" | awk '{print \$8}'`; chomp $NETIF;
     if ($ifs != '1'){
-      # print "IDEBUG: ifs = [$ifs]\n";
       die "\nERROR: Your system is multi-homed - I've detected more than 1 active interface:
 $NETIF \nPlease specify the one you want to use via the '--interface' flag.\n";
     } else {
@@ -275,8 +276,12 @@ if ($fparts_already_running ne ''){
     else {die "\nFine - clear up the confusion and try again.\n"}
 }
 my $x = 0;
+
 $fnd2r =~ s/^\s+|\s+$//g ; # trim leading and trailing
-$fnd2r =~ s/ /\\ /g; # subs internal spaces with escaped spaces
+# Up to the user to escape internal spaces in the names of target dirs.
+# keeping the following line here as a reminder to think about how to better 
+# address this problem.
+#$fnd2r =~ s/ /\\ /g; # subs internal spaces with escaped spaces
 my $cmd = "fpart -v -L -z -s $FPARTSIZE_N -o $FP_ROOT $fnd2r  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE"; # captures the child PID!
 if ($DEBUG) {print "DEBUG: fpart fork cmd:\n[$cmd]\n";} sleep 5;
 if ($FPART_PID = fork) { # this actually takes a couple of seconds 
