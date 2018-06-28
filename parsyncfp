@@ -16,9 +16,6 @@ use File::Path qw(remove_tree);
 # check github for bug reports.
  
 # TODO
-## add both RDMA AND TCP outputs on the scrolling output.
-#  Use the code from rdma-tcp-stat to include it.
-
 # - [x] done: fix bandwidth calculation subroutine.
 # - [x] done: check for fpart before running.
 # - [x] done: test for '-d' or --delete' in the rsyncopts line and refer to problem with this.
@@ -41,7 +38,6 @@ $parsync_dir $PARSYNCVER $PIDFILE $PIDFILE $prev_cache $lenPID $DISPOSE
 $rem_host $remote $rem_path $rem_user  $rootdir $rPIDs $sPIDs
 $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
 @SYSLOAD $TARGET $tmp $Totlsiz %UTILS $VERSION $OS $Linux $MacOSX $NETFILE $myIP
-$avgrec_t $avgsend_t $avgrec_r $avgsend_r
 );
 
 $PARSYNCVER =  << "VERSION";
@@ -411,17 +407,15 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
   # check cycles, print if exceed then reset counter.
   if ($cyclecnt++ > ($CHECKPERIOD - 4)) {
 
-  $avgrec_t = $avgsend_t = $avgrec_r = $avgsend_r = 0;
+  my $avgsend;
   if ($Linux) {
-    # $avgrec_t, $avgsend_t_t = tcp
-    # $avgrec_r, $avgsend_r = rdma
-    (my $avgrec_t, $avgsend_t, $avgrec_r, $avgsend_r) = getavgnetbw($NETIF, $CHECKPERIOD, $RDMA); 
-    chomp $avgsend_t; $avgsend_t = ($avgsend_t / 1048576);
+    (my $avrecv, $avgsend) = getavgnetbw($NETIF, $CHECKPERIOD); 
+    chomp $avgsend; $avgsend = ($avgsend / 1048576);
   } else {
     if ($DEBUG) {print "DEBUG: netstat lines next with myIP=[$myIP]\n";}
     my $o1_bytes = `netstat -bi | grep $myIP | awk '{print \$10}'`; sleep $CHECKPERIOD;
     my $o2_bytes = `netstat -bi | grep $myIP | awk '{print \$10}'`;
-    $avgsend_t = ($o2_bytes - $o1_bytes) / $CHECKPERIOD / 1000000;
+    $avgsend = ($o2_bytes - $o1_bytes) / $CHECKPERIOD / 1000000;
   }
   my $cur_secs = `date +"%s"`;
   my $el_min = ($cur_secs - $start_secs) / 60; 
@@ -430,7 +424,7 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
   # print out the line
   if ($VERBOSE > 0) {
     printf "%8s   %5.2f    %5.2f  %9.2f       %2d    <>  %2d          [%d] of [%d]",
-  $rDATE, $el_min, $SYSLOAD[0],   $avgsend_t ,   $NrPIDs, $NsPIDs, $CUR_FPI, $nbr_cur_fpc_fles;  
+  $rDATE, $el_min, $SYSLOAD[0],   $avgsend ,   $NrPIDs, $NsPIDs, $CUR_FPI, $nbr_cur_fpc_fles;  
   }
   # and then over-write it or add a newline for scrolling data.
   if ($VERBOSE == 1) { printf "\r";}
@@ -659,29 +653,33 @@ sub get_rPIDs($$) {
   return ($rpids, $crr);
 }
 
-sub getavgnetbw ($$) { # call as ($avrecv, $avgsend_t) = getavgnetbw($NETIF, $CHECKPERIOD, $RDMA)
+sub getavgnetbw ($$) { # call as ($avrecv, $avgsend) = getavgnetbw($NETIF, $CHECKPERIOD)
     my ($avgrec,$avgtrans,$R1,$T1,$R2,$T2);
     my $NETIF = shift; my $CHECKPERIOD = shift;
-    $R1t=`cat /sys/class/net/${NETIF}/statistics/rx_bytes`; 
-    $T1t=`cat /sys/class/net/${NETIF}/statistics/tx_bytes`;
-    $R1r=`perfquery -x  | grep RcvData  | cut -f2 -d: | sed -e 's/\.*//g'`
-    $T1r=`perfquery -x  | grep XmitData | cut -f2 -d: | sed -e 's/\.*//g'`;
+    $R1=`cat /sys/class/net/${NETIF}/statistics/rx_bytes`; 
+    $T1=`cat /sys/class/net/${NETIF}/statistics/tx_bytes`;
     sleep $CHECKPERIOD;
-    $R2t=`cat /sys/class/net/${NETIF}/statistics/rx_bytes`; 
-    $T2t=`cat /sys/class/net/${NETIF}/statistics/tx_bytes`;
-    $R2r=`perfquery -x  | grep RcvData  | cut -f2 -d: | sed -e 's/\.*//g'`
-    $T2r=`perfquery -x  | grep XmitData | cut -f2 -d: | sed -e 's/\.*//g'`;
-    $avgrec_t = ($R2t - $R1t);
-    $avgtrans_t = ($T2t - $T1t); 
-    $avgrec_r = ($R2r - $R1r);
-    $avgtrans_t = ($T2r - $T1r); 
-    
-    if ($RDMA) {
-        return ($avgrec_t, $avgtrans_t, $avgrec_r, $avgtrans_t);
-    } else {
-        return ($avgrec_t, $avgtrans_t, 0, 0);
-    }
+    $R2=`cat /sys/class/net/${NETIF}/statistics/rx_bytes`; 
+    $T2=`cat /sys/class/net/${NETIF}/statistics/tx_bytes`;
+    $avgrec = ($R2 - $R1);
+    $avgtrans = ($T2 - $T1); 
+    return ($avgrec, $avgtrans);
 }
+
+# below is the variant that uses a time period to check over that time.
+# sub getavgnetbw ($$) { # call as ($avrecv, $avgsend) = getavgnetbw($NETIF,$CHECKPERIOD)
+#     my ($avgrec,$avgtrans,$R1,$T1,$R2,$T2);
+#     my $NETIF = shift; my $CHECKPERIOD = shift;
+#     my $file = shift;   #, my $reps = shift;
+#     $R1=`cat /sys/class/net/$NETIF/statistics/rx_bytes`; 
+#     $T1=`cat /sys/class/net/$NETIF/statistics/tx_bytes`;
+#     sleep $CHECKPERIOD;
+#     $R2=`cat /sys/class/net/$NETIF/statistics/rx_bytes`; 
+#     $T2=`cat /sys/class/net/$NETIF/statistics/tx_bytes`;
+#     $avgrec = ($R2 - $R1) / $CHECKPERIOD;
+#     $avgtrans = ($T2 - $T1) / $CHECKPERIOD;
+#     return ($avgrec, $avgtrans);
+# }
 
 
 sub pause {
