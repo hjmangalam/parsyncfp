@@ -3,9 +3,12 @@ a parallel rsync wrapper in Perl
 
 ## Changes
 
+### 1.54
+- Bungled a commit.  This one should straighten is out.
+
 ### 1.53 
 - removed internal space handling for target names since this interferes with multiple
-dir targets.  Have to re-think this.
+dir targets.  Have to re-think this.  Also, bungled a commit.  This one should 
 
 ### 1.50
 - fixed Ken Bass' bug where trimming dir name was not constrained to front
