@@ -1,42 +1,7 @@
 # parsyncfp
 a parallel rsync wrapper in Perl
 
-## Changes
-
-### 1.54
-- Bungled a commit.  This one should straighten is out.
-
-### 1.53 
-- removed internal space handling for target names since this interferes with multiple
-dir targets.  Have to re-think this.  Also, bungled a commit.  This one should 
-
-### 1.50
-- fixed Ken Bass' bug where trimming dir name was not constrained to front
-   of the string and could lead to problems if dir was names something like
-   '/data/rna/hjm/rnaseq/data/something/version/data/smith'
-   if the leading name was '/data/' the condensed, trimmed dir was 
-   changed to
-   'rna/hjm/rnaseq/something/version/smith' ie removal of ALL 'data/'
-- fixed finding top level targets with embedded spaces - had to trim spaces
-   and escape filenames going into fpart.
-- many verbosity fixes
-- some changes to ending text to reference both rsync and fpart logs 
-
-
-### 1.47
-- changed format of output to add elapsed time, changed date format
-- code cleanup
-- fixed bandwidth speed calculation
-- updated help and fixed some inaccuracies for latest version.
-- added (declinable) scripted mod to ~/.ssh/config to reduce ssh warnings
-
-### 1.46
-- made it variably verbose (--verbose)
-- adjusted ending conditions to be accurate
-- some code cleanup.  getting there.
-- added checks for multihomed devices.
-
-
+(Version changes moved to the bottom of this file)
 
 ## Background
 
@@ -47,6 +12,9 @@ collects files based on size or number into chunkfiles which can be fed to rsync
 chunk by chunk basis.  This allows pfp to begin transferring files before the 
 complete recursive descent of the source dir is complete.  This feature can save many 
 hours of prep time on very large dir trees.
+
+Dependencies: In addition to the above "fpart", pfp also requires 2 other Perl-based utilities, [scut](http://moo.nac.uci.edu/~hjm/scut) or [via git](https://github.com/hjmangalam/scut) and [stats](http://moo.nac.uci.edu/~hjm/stats) or via the same git as scut.  
+
 
 pfp is primarily tested on Linux, but is being ported to MacOSX
 as well. 
@@ -229,3 +197,43 @@ The correct version of the above command is:
 
 ```# ssh to hjm\@moo, install parsyncfp, then:
 % parsyncfp  --startdir=/usr  local  hjm\@remote:/home/hjm/mooslocal```
+
+
+## Changes
+
+### 1.54
+- Bungled a commit.  This one should straighten is out.
+
+### 1.53 
+- removed internal space handling for target names since this interferes with multiple
+dir targets.  Have to re-think this.
+
+### 1.50
+- fixed Ken Bass' bug where trimming dir name was not constrained to front
+   of the string and could lead to problems if dir was names something like
+   '/data/rna/hjm/rnaseq/data/something/version/data/smith'
+   if the leading name was '/data/' the condensed, trimmed dir was 
+   changed to
+   'rna/hjm/rnaseq/something/version/smith' ie removal of ALL 'data/'
+- fixed finding top level targets with embedded spaces - had to trim spaces
+   and escape filenames going into fpart.
+- many verbosity fixes
+- some changes to ending text to reference both rsync and fpart logs 
+
+
+### 1.47
+- changed format of output to add elapsed time, changed date format
+- code cleanup
+- fixed bandwidth speed calculation
+- updated help and fixed some inaccuracies for latest version.
+- added (declinable) scripted mod to ~/.ssh/config to reduce ssh warnings
+
+### 1.46
+- made it variably verbose (--verbose)
+- adjusted ending conditions to be accurate
+- some code cleanup.  getting there.
+- added checks for multihomed devices.
+
+
+
+
