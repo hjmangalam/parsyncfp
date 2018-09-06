@@ -3,19 +3,23 @@ use strict;
 use Getopt::Long;      # for std option handling: -h --yadda=badda, etc
 use Socket;
 use Env qw(HOME PATH);
-use File::Path qw(remove_tree);
-
+use File::Path qw(remove_tree make_path);
+use Term::ANSIColor;  # for alarms
 
 # after significant changes, update the tarball and cp to moo for distribution; update the github
 # fn="/home/hjm/bin/parsyncfp"; cd ; cp  $fn ~/parsyncfp/; tar -cvzf parsyncfp+utils.tar.gz parsyncfp; scp parsyncfp+utils.tar.gz moo:~/public_html/parsync ; 
 # copy to all the local hosts
-# scp $fn moo:~/public_html; scp $fn moo:~/bin;  scp $fn   dabrick:~/bin; ssh -t moo 'scp bin/parsyncfp hmangala@hpcs:~/bin'
+# scp $fn moo:~/public_html; scp $fn moo:~/bin;  scp $fn   dabrick:~/bin; ssh -t moo 'scp bin/parsyncfp hmangala@hpcs:/data/hpc/bin'; 
 
 # don't forget!!  using git!  Add changes to changelog in the README.md file
 # cd ~/gits/parsyncfp; cp ~/bin/parsyncfp .; git add parsyncfp README.md; git commit -m 'commit message'; git push
 # check github for bug reports.
  
 # TODO
+# - [x] check the sequencing for the use of the alt-cache option to make sure that things are being 
+#     deleted or not in the right sequence.
+# - [x] write funcs to color different outputs different colors based on what they are - 
+#    blue for INFO, orange for WARNINGs, red for ERRORs, 
 # - check that fpart can generate at least the # of chunk that are > than NP (as below)
 # - port to MacOSX using hackintosh
 # - [x] done: fix bandwidth calculation subroutine.
@@ -43,9 +47,9 @@ $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
 );
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.54 
-June 28th, 2018
-by Harry Mangalam <hjmangalam\@gmail.com> || <harry.mangalam\@uci.edu>
+parsyncfp version 1.55 
+Sept 6th, 2018
+by Harry Mangalam <hjmangalam\@gmail.com>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
 'rsync' to provide some load balancing and parallel operation across
@@ -73,7 +77,7 @@ if (! @ARGV) {usage();} # in case someone doesn't know what to do.
   "nowait|nw!"       =>   \$NOWAIT,      # sleep a few s rather than wait for a user ack
   "help!"            =>   \$HELP,        # dump usage, tips
   "version!"         =>   \$VERSION,     # duh..
-  "dispose|d=s"     =>   \$DISPOSE,     # what to do with the cache (compress, delete, leave untouched)
+  "dispose|d=s"      =>   \$DISPOSE,     # what to do with the cache (compress, delete, leave untouched)
   "debug|d!"         =>   \$DEBUG,       # developer-level info; (historical) alias for '-v 3'
 );
 
@@ -81,25 +85,25 @@ if (! @ARGV) {usage();} # in case someone doesn't know what to do.
 
 $DATE=`date +"%T_%F" | sed 's/:/./g' `; chomp $DATE;
 if (! defined $ALTCACHE) {$parsync_dir = $HOME . "/.parsyncfp";}
-else {$parsync_dir = $ALTCACHE; mkdir $parsync_dir;}
+else {$parsync_dir = $ALTCACHE; }  #mkdir $parsync_dir; !!!
 $NETFILE = "/proc/net/dev";
 $OS = `uname -s`; chomp $OS;
 $Linux = $MacOSX = 0;
 if ($OS =~ /Linux/) {$Linux = 1;} else {$MacOSX = 1;}
 $DFLT_RSYNCOPTS = "-a -s"; # the default options to pass to rsync; blanked if define $RSYNCOPTS
-if (defined $VERSION) { print $PARSYNCVER; exit;}
+if (defined $VERSION) { print colored(['green'], $PARSYNCVER, "\n"); exit;}
 if (!defined $CHECKPERIOD) {$CHECKPERIOD = 3;}
 if (!defined $VERBOSE) {$VERBOSE = 2;}
 
 my $fpcheck = `which fpart`;
-if ($fpcheck eq "") {die "\nFATAL: There's no 'fpart' executable on your PATH. Did you install it?
-See: https://github.com/martymac/fpart/blob/master/README\n";}
+if ($fpcheck eq "") {FATAL("There's no 'fpart' executable on your PATH. Did you install it?
+See: https://github.com/martymac/fpart/blob/master/README");}
 
 if (!defined $RSYNCOPTS) {$RSYNCOPTS = ""; $DFLT_RSYNCOPTS = "-a -s";}
 else {  # if def $RSYNCOPTS, then user takes all responsibility
     $DFLT_RSYNCOPTS = "";
     if ($RSYNCOPTS =~ / -d / || $RSYNCOPTS =~ / --del/){ # user tries to pass in a 'delete' option
-        print "\nWARN: It looks like you're trying to pass in a '--delete' option 
+        WARN("It looks like you're trying to pass in a '--delete' option 
 in the '--rsyncopts' string.  [$RSYNCOPTS]
 Because parallel rsyncs don't know what the other rsyncs are doing, 
 'delete' options don't work well. If this is what you want to do, 
@@ -115,7 +119,7 @@ to run parsyncfp. 'fpsync' DOES provide support for a parallel '--delete',
 and the author provides a good explanation as to how he does this here:
 <https://goo.gl/dtwp3P>.  HOWEVER!! Anytime you use '--delete' in an rsync 
 operation, MAKE SURE you know what you're doing.
-";
+"); exit(0);
     }
 } 
 
@@ -136,7 +140,7 @@ if ($Linux) {
     $NCPUs = `sysctl -n hw.ncpu`; chomp $NCPUs;
     $loadavg = `sysctl -n vm.loadavg | cut -d" " -f2 -f3 -f4 | tr -d '\n'`;
     $lenPID = 5; # highest possible pid is 99998.
-} else {die "FATAL: parsyncfp only supports Linux and MacOSX at this point\n";}
+} else { FATAL("parsyncfp only supports Linux and MacOSX at this point\n"); }
 
 @SYSLOAD = split (/\s+/, $loadavg); # 1st 3 fields are 1, 5, 15m loads
 # so as long as the 1m load / NCPUs < 1, we're fine; if > 1, we may want to start throttling..
@@ -197,31 +201,30 @@ if ($DEBUG){
 	    OK to continue.\n "
   }
 } else {
-  print "\n!!WARN: 1m System load is > [$SYSLOAD[0]].  The 1m Load:#CPU ratio is [$LOAD1mratio].\n Continue? [Cntrl+C to interrupt; Enter to continue]\n ";
+  WARN("1m System load is > [$SYSLOAD[0]].  The 1m Load:#CPU ratio is [$LOAD1mratio].
+  Continue? [Cntrl+C to interrupt; Enter to continue]");
   pause();
 }
 
 $FP_ROOT_DIR = "${parsync_dir}/fpcache";
-
 if (-d $parsync_dir) {
-  if ($VERBOSE >= 1) {print <<LS;
-
-  WARN: about to remove all the old cached chunkfiles from [$FP_ROOT_DIR].
+  if ($VERBOSE >= 1) {WARN("About to remove all the old cached chunkfiles from [$FP_ROOT_DIR].
   Enter ^C to stop this.
-        If you specified '--nowait', cache will be cleared in 3s regardless.
-  Otherwise, hit [Enter] and I'll clear them.
-LS
+  If you specified '--nowait', cache will be cleared in 3s regardless.
+  Otherwise, hit [Enter] and I'll clear them.");
   }
   $glob = "${FP_ROOT_DIR}/f*";
   if ($NOWAIT){ sleep 3;}
   elsif ($VERBOSE > 0) {pause();}
   system("rm -f $glob");
-  if ($VERBOSE >=2 ) {print "INFO: The fpart chunk files [$glob] are cleared.. continuing\n";}
+  if ($VERBOSE >=2 ) {
+    INFO("The fpart chunk files [$glob] are cleared .. continuing.")
+  }
 } elsif (! -d $parsync_dir) {
-   mkdir  $parsync_dir or die "FATAL: Can't mkdir [$parsync_dir]\n";
+   make_path  $parsync_dir or FATAL("Can't create [ $parsync_dir ]");
 }
 
-if (! -d $FP_ROOT_DIR) {mkdir $FP_ROOT_DIR or die "FATAL: Can't make 'FP_ROOT_DIR' [$FP_ROOT_DIR]\n";}
+if (! -d $FP_ROOT_DIR) {mkdir $FP_ROOT_DIR or FATAL("Can't make 'FP_ROOT_DIR' [$FP_ROOT_DIR]");}
 $FP_ROOT = $FP_ROOT_DIR . "/f";  # the root name of the fpart chunk files f.1, etc
 $PIDFILE = $FP_ROOT_DIR . '/' . "rsync-PIDs" . '-' . $DATE;
 $FPART_LOGFILE = $FP_ROOT_DIR . '/' . "fpart.log." . $DATE;
@@ -231,13 +234,13 @@ $hdr_cnt = 21;  # header counter; > $hdr_rpt so it gets printed 1st time
 
 # this takes care of the last ARGV so that all the rest of the words are target dirs&files
 $TARGET = $ARGV[$#ARGV]; # remote rsync target
-if (!defined $TARGET ){die "\n\nXX FATAL XX: No target defined! Where you gonna put this stuff??!?\nTry $0 --help for the built-in help.\n"}
+if (!defined $TARGET ){ FATAL("No target defined! Where you gonna put this stuff??!?\nTry $0 --help for the built-in help."); }
 $#ARGV--;
 
-if ($TARGET =~ /~/) {die "\n\tFATAL: You defined the target dir with a '~': [$TARGET]. 
-\tWhile this SHOULD work, it often doesn't so I'm going to force you to replace 
-\tit with an explicit remote path.  
-\tie instead of using '~/dir', please use '/home/<user>/dir.  Sorry. \n\n";}
+if ($TARGET =~ /~/) { FATAL("You defined the target dir with a '~': [$TARGET].
+    While this SHOULD work, it often doesn't so I'm going to force you to replace 
+    it with an explicit remote path.  
+    ie instead of using '~/dir', please use '/home/<user>/dir.  Sorry."); }
 
 # now process the dirs
 $dcnt = 0;
@@ -249,9 +252,9 @@ if (!defined $dirtmp) { $dirtmp = `pwd`;}
 while (defined $dirtmp) { # should work on explicitly named dirs as well as globs.
   $dirtmp = $ROOTDIR . '/' . $dirtmp;
   if (! -r $dirtmp){ # quick check to see if its readable.
-    print "\nWARN: [$dirtmp] isn't readable; 
+    WARN("[$dirtmp] isn't readable; 
     either it's not where you think it is or you need to escalate your privs.  
-    Regardless, it won't be transferred in this run.\n\n";
+    Regardless, it won't be transferred in this run.");
     if ($NOWAIT){ sleep 3;}
     elsif ($VERBOSE > 0) {pause();}
   } else {  # otherwise, add the file to list to be chunked and  transferred.
@@ -264,16 +267,19 @@ my @cachefiles = (); # will populate with list of cachefiles to process together
 
 my $fparts_already_running = `ps aux | grep 'fpar[t]'`; chomp $fparts_already_running;
 if ($fparts_already_running ne ''){
-    print "WARN: one or more 'fpart's are already running:
-    ====
+    WARN("One or more 'fpart's are already running:
+    ======
     [$fparts_already_running]
-    ====
-    Unless you know that these fparts are valid and not left over from previous 
-    parsyncfp's, you should exit and kill them off before restarting this run.
-    Continue? [Ny] ";
-    my $ansr = <STDIN>;
-    if ($ansr =~ /[yY]/) { print "\nOK, continuing\n"; }
-    else {die "\nFine - clear up the confusion and try again.\n"}
+    ======
+    Unless you know that these fparts are valid (ie you're running 
+    another parsyncfp in another shell on this machine) and not 
+    left over from previous parsyncfp's, you should ^C and kill 
+    them off before restarting this run.
+    
+    Pausing for 5s to allow you to read this and take action (or not).
+    If you do nothing, I'll continue.
+    "); 
+    sleep 5;
 }
 my $x = 0;
 
@@ -285,15 +291,15 @@ $fnd2r =~ s/^\s+|\s+$//g ; # trim leading and trailing
 my $cmd = "fpart -v -L -z -s $FPARTSIZE_N -o $FP_ROOT $fnd2r  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE"; # captures the child PID!
 if ($DEBUG) {print "DEBUG: fpart fork cmd:\n[$cmd]\n";} sleep 5;
 if ($FPART_PID = fork) { # this actually takes a couple of seconds 
-    if ($VERBOSE >= 2) { print "\nINFO: Forking fpart.  Check [$FPART_LOGFILE] for errors if it hangs.\n"; }
+    if ($VERBOSE >= 2) { INFO("Forking fpart.  Check [$FPART_LOGFILE] for errors if it hangs."); }
 } else {
-system "$cmd";
-$FPART_PID = `cat $FP_PIDFILE`; chomp $FPART_PID;
-exit(0); # it's forked, now exit this stanza
+    system "$cmd";
+    $FPART_PID = `cat $FP_PIDFILE`; chomp $FPART_PID;
+    exit(0); # it's forked, now exit this stanza
 }
 # fpart has been forked; wait for enough chunkfiles to be written to start the rsyncs
 while (! -e $FP_PIDFILE) { sleep 1;
-if ($VERBOSE >= 2) {print "INFO: Waiting for fpart to be forked..\n";}
+    if ($VERBOSE >= 3) {INFO("Waiting for fpart to be forked..");}
 }
 $FPART_PID = `cat $FP_PIDFILE`; chomp $FPART_PID;
 my $ready2start = my $waitcnt = $NBR_FP_FLES = 0;
@@ -302,11 +308,11 @@ my $fp1 = $FP_ROOT . ".1";
 my $done = 0;
 while ($ready2start == 0) {
 if (-e $fp0) {
-    if ($VERBOSE >= 2) {print "INFO: [$fp0] visible.\n";}
+    if ($VERBOSE >= 3) {INFO("[$fp0] visible.");}
     $NBR_FP_FLES++; $ready2start=1; 
 }
 $waitcnt++;
-if ($VERBOSE >= 2) {print "INFO: Waiting [$waitcnt]s for chunk files to be written\n";}
+if ($VERBOSE >= 3) {INFO("Waiting [$waitcnt]s for chunk files to be written");}
 sleep 1;
 }
 
@@ -317,7 +323,7 @@ my $FPCFS = "${FP_ROOT}."; # FP Chunk File Stem
 my $NBR_FP_FLES = `\\ls -U1 ${FPCFS}* | wc -l`; chomp $NBR_FP_FLES;
 $RSYNCS_GOING = $CUR_FPI = 0; # $CUR_FPI = current FP index
 
-if ($VERBOSE >= 2) {print "\nINFO: Starting the 1st [$NP] rsyncs ..\n";}
+if ($VERBOSE >= 2) {INFO("Starting the 1st [$NP] rsyncs ..");}
 my $sc = 0;
 while ($RSYNCS_GOING < $NP && $KEEPGOING) { #
   $CUR_FP_FLE = $FP_ROOT . "." . $CUR_FPI ; # the current fp chunkfile
@@ -339,7 +345,7 @@ while ($RSYNCS_GOING < $NP && $KEEPGOING) { #
       # so if it's done, then we're done.  No more chunk files, so no more rsyncs to start.
       $KEEPGOING = 0; # signal the while loop to break.
     } else { # fpart is still going so wait for the next fpart chunkfile to be finished.
-      if ($VERBOSE >= 2) {print "INFO: waiting [$sc]s for next chunkfile [$CUR_FP_FLE]\r";} sleep 2; $sc += 2;
+      if ($VERBOSE >= 2) {INFO("waiting [$sc]s for next chunkfile [$CUR_FP_FLE]\r");} sleep 2; $sc += 2;
     }
   }
 }  #while ($RSYNCS_GOING < $NP && $KEEPGOING)
@@ -467,7 +473,7 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
 	$rPIDs =~ s/$raPIDs[$e]//g; # only then delete that PID fr the rPID string
       }
     } else { # there aren't any more PIDs left - all done or killed off.'
-      if ($VERBOSE >= 2) {print "\tINFO: No more running rsync PIDs left [$rPIDs].  All rsyncs are suspended [$sPIDs].\n";}
+      if ($VERBOSE >= 2) {WARN("No more running rsync PIDs left [$rPIDs].  All rsyncs are suspended [$sPIDs].");}
     }
   } elsif ($sPIDs =~ /\d+/) { # if there are sPIDs, unsuspend them one by one
     # split em
@@ -485,7 +491,7 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
     my $cfw = 0;
     $FPART_RUNNING = `ps aux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
     while (! -e $CUR_FP_FLE && $FPART_RUNNING eq '1'){
-      if ($VERBOSE >= 2) {print "INFO: Waiting [$cfw] s for next chunkfile..\r"; sleep 2; $cfw += 2;}
+      if ($VERBOSE >= 2) {INFO("Waiting [$cfw]s for next chunkfile..\r"); sleep 2; $cfw += 2;}
     }
     ($rPIDs, $crr) = get_rPIDs($PIDFILE, $sPIDs);
     my $n = my @a = split(/\s+/, $rPIDs);
@@ -502,13 +508,13 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
 
         if ($rPIDs eq "" && $sPIDs eq "" && $CUR_FPI >= $nbr_cur_fpc_fles && $FPART_RUNNING == 0){
             # then we're done - exit.
-            if ($VERBOSE >= 2) {print "\nINFO: Done.  Please check the target to make sure 
-  expected files are where they're supposed to be. \n";}
+            if ($VERBOSE >= 2) {INFO("Done.  Please check the target to make sure 
+  expected files are where they're supposed to be. \n");}
             
             # remind user how much storage the cache takes and to clear the cache files 
             my $du_cache = `du -sh $parsync_dir`; chomp $du_cache;
-            if ($VERBOSE >= 2) {print "
-INFO: The parsyncfp cache dir takes up [$du_cache]
+            if ($VERBOSE >= 2) {INFO("
+    The parsyncfp cache dir takes up [$du_cache]
     Don't forget to delete it, but wait until you are sure that your job
     completed correctly, so you don't need the log files anymore.
     
@@ -517,13 +523,13 @@ Reminder: check the parsyncfp log [$logfile]
     if there were errors. Use '--verbose=1' for less output.
       
       Thanks for using parsyncfp. Tell me how to make it better.
-                       <hjmangalam\@gmail.com>\n";
+                       <hjmangalam\@gmail.com>\n");
             }
             exit;
         }
         while  (($CUR_FPI >= $nbr_cur_fpc_fles) && $fparts_already_running ne '') {
             if ($DEBUG) {print "DEBUG: CUR_FPI=$CUR_FPI >= nbr_cur_fpc_fles=$nbr_cur_fpc_fles?\n";}
-            if ($VERBOSE >= 2) {print "INFO: Waiting for fpart to get ahead of the transfer..\r"; }
+            if ($VERBOSE >= 2) {INFO("Waiting for fpart to get ahead of the transfer..\r"); }
             $nbr_cur_fpc_fles = `\\ls -U1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
             $fparts_already_running = `ps aux | grep 'fpar[t]'`; chomp $fparts_already_running;
             sleep 2;
@@ -538,7 +544,7 @@ Reminder: check the parsyncfp log [$logfile]
         # OR keep cycling continuously on a 1s loop and ONLY print out info every X cycles.  This is the easiest way. 
         if (-e $CUR_FP_FLE) {
             fixfilenames($CUR_FP_FLE, $ROOTDIR);  # check & fix for spaces, bad chars.
-            if ($VERBOSE >= 2) {"\tINFO: next chunk [", ($CUR_FPI+1), "] of [$nbr_cur_fpc_fles]\n";}
+            if ($VERBOSE >= 3) {my $tt = $CUR_FPI+1;  INFO("next chunk [$tt] of [$nbr_cur_fpc_fles]");}
             system("$RSYNC_CMD"); # capture the bg job PID to PIDfile
             $CUR_FPI++;
         }
@@ -568,13 +574,13 @@ elsif ($DISPOSE =~ /c/ ) { # can it just be put into background?
   #print "final tar cmd: [$cmd] \n";
   system ("$cmd");
 } elsif ($VERBOSE >=2 ) {
-  print "\n\nINFO: Your cache files have been left intact in [${FP_ROOT_DIR}]. 
+  INFO("Your cache files have been left intact in [${FP_ROOT_DIR}]. 
   Please dispose of them as you see fit.
   
   Reminder: check [$FPART_LOGFILE] for errors if there were errors.
   
   Thanks for using parsyncfp. Tell me how to make it better.
-  <hjmangalam\@gmail.com>\n";
+  <hjmangalam\@gmail.com>");
 }
 exit;
 
@@ -592,11 +598,12 @@ sub check_utils {
   foreach my $util (keys %UTILS){
     my $utilpath = `which $util | tr -d '\n'`;
     if ($utilpath !~ /$util/){
-      print "!!WARN: [$util] not found.  you can get 'fpart' here:
-	<http://moo.nac.uci.edu/~hjm/parsync/utils>
-      and the rest via yum, apt-get, or google.\n";
-      die "\n\nFATAL: [$util] isn't on your PATH [$PATH]; Please install it or correct your PATH variable to include it.\nTry ''module load perl'' or use cpan to install it.\n\n"
-    } else {$UTILS{$util} = $utilpath;
+      FATAL("[$util] not found.  you can get 'fpart' here:
+	  <http://moo.nac.uci.edu/~hjm/parsync/utils>
+      and the rest via yum, apt-get, or google.  Please install it or correct your 
+      PATH variable to include it.");
+    } else {
+      $UTILS{$util} = $utilpath;
       if ($DEBUG){print "\tEVAL: Found [$util] at [$utilpath].\n"}
     }
   }
@@ -623,7 +630,7 @@ sub get_rPIDs($$) {
   # so have to do a diff of the PIDFILE vs all PIDs of rsyncs running.
   my $ALL_SYS_RSYNC_PIDS = `ps aux | grep rsyn[c] |  awk '{print $2}' | sort -g | tr '\n' ' '`;  chop $ALL_SYS_RSYNC_PIDS;
   $NASRP = @ASRP = split(/\s+/, $ALL_SYS_RSYNC_PIDS);
-  open (PIDFILE, "<$pidfile") or die "\nFATAL: Can't open PIDFILE [$pidfile]'.\n";
+  open (PIDFILE, "<$pidfile") or FATAL("Can't open PIDFILE [$pidfile]'");
   # PIDs from the PIDFILE to compare system rsyncs (could be multiple going)
   # with parsync-launched rsyncs
   while (<PIDFILE>) {chomp;  $aprPIDs[$apr++] = $_; } # all parsyncfp rsync PIDs
@@ -692,6 +699,39 @@ sub pause {
     my $tmp = <STDIN>;
 }
 
+# color info string ($) blue
+sub INFO($) {
+    my $msg = shift;
+    print color('bold blue');
+    print "INFO: $msg \n";
+    print color('reset');
+}
+
+# # color warning string ($) orange
+sub WARN($) {
+    my $msg = shift;
+    print color('bold magenta');
+    print "WARN: $msg \n";
+    print color('reset');
+}
+
+# color error string ($) red
+sub ERROR($) {
+    my $msg = shift;
+    print color('bold red');
+    print "ERROR: $msg \n";
+    print color('reset');
+}
+
+sub FATAL($) {
+    my $msg = shift;
+    print color('bold red');
+    print "\n ** FATAL ERROR **: $msg \n\n";
+    print color('reset');
+    exit(1);
+}
+
+
 # call as [debug(__LINE__, "string")] to print line # and debug string
 sub debug($$) {
 	my $line = shift;
@@ -732,7 +772,7 @@ sub ptgmk {
   $instr =~ s/^\s+|\s+$//g;
   my $abbr = chop $instr;
   my $nbr = $instr;
-  if ($abbr !~ /[PpTtGgMmKk]/) {die "\n\nFATAL: tgmk() input doesn't contain [TtGgMmKk], so nothing to convert.\n\n"; }
+  if ($abbr !~ /[PpTtGgMmKk]/) {FATAL("ptgmk() input doesn't contain [PpTtGgMmKk], so nothing to convert.");}
   if ($abbr =~ /[Kk]/) {$nbr *= 1024; return $nbr;}
   if ($abbr =~ /[Mm]/) {$nbr *= 1048576; return $nbr;}
   if ($abbr =~ /[Gg]/) {$nbr *= 1073741824; return $nbr;}
@@ -744,7 +784,7 @@ sub fix_ssh_config {
     $HOME = $ENV{"HOME"};
     my $append_fxt = 0;
     if (-e "$HOME/.ssh/config") { # if it exists, fix it.
-    open (CF, "<$HOME/.ssh/config") or die "\nFATAL: Can't open $HOME/.ssh/config, even tho it exists.. WTF??\n";
+    open (CF, "<$HOME/.ssh/config") or FATAL("Can't open $HOME/.ssh/config, even tho it exists.. WTF??");
     while (<CF>) {
         if ($_ =~ /ForwardX11Trusted\s+yes/i) { $append_fxt = 0;}
         if ($_ =~ /ForwardX11Trusted\s+no/i) {  $append_fxt = 1;}
@@ -752,19 +792,19 @@ sub fix_ssh_config {
     close CF;
     } else { $append_fxt = 1;}
     if ($append_fxt) {
-        print "\n\tINFO: parsyncfp would like to append 'ForwardX11Trusted yes' & 'ForwardX11 yes' 
+        INFO("parsyncfp would like to append 'ForwardX11Trusted yes' & 'ForwardX11 yes' 
         to your ~/.ssh/config.
         Skipping this may result in a lot of odd ssh warnings being emitted during 
         the run if you don't have ssh set correctly for the remote system, but the 
         transfer should still work.)
    
-If this mod of your ~/.ssh/config file is OK, hit [Enter].  Otherwise hit [s] to skip. ";
+If this mod of your ~/.ssh/config file is OK, hit [Enter].  Otherwise hit [s] to skip. ");
         my $tmp = <STDIN>; 
         if ($tmp !~ /[sS]/) {
             system ("echo -n \"#Next 2 lines added by parsyncfp\nForwardX11Trusted       yes\nForwardX11              yes\n\" >> $HOME/.ssh/config" );
             system("chmod 600 $HOME/.ssh/config");
-            print "\n\tINFO: Your ~/.ssh/config file is set correctly.\n"; sleep 1;
-        } else {print "\n\tINFO: your ~/.ssh/config was not changed.\n"; sleep 1;}
+            INFO("Your ~/.ssh/config file is set correctly.\n"); sleep 1;
+        } else {INFO("Your ~/.ssh/config was not changed."); sleep 1;}
     }
 }
 
@@ -959,3 +999,4 @@ HELP
   die "Did that help?.
   Send suggestions for improvement to <hjmangalam\@gmail.com>\n";
 }
+
