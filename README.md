@@ -201,6 +201,11 @@ The correct version of the above command is:
 
 ## Changes
 
+### 1.56
+- added a better measurement of TCP bytes sent (via /proc/net/dev) 
+- added attempt at measuring RDMA bytes sent by using 'perfquery'; looks like it's
+doing what it's supposed to.
+
 ### 1.54
 - Bungled a commit.  This one should straighten is out.
 

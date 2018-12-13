@@ -16,6 +16,11 @@ use Term::ANSIColor;  # for alarms
 # check github for bug reports.
  
 # TODO
+# - [x] changed the calc for determining TCP network bandwidth to reference /proc/net/dev which should
+#       be more reliable across distro's and maybe even OSs.  However, this won't detect RDMA data.  For that,
+#       need perfquery.
+# - [x] addded RDMA support (if the interface =~ ib, then it will try to use perfquery to measure the RDMA
+#       bandwidth
 # - [x] check the sequencing for the use of the alt-cache option to make sure that things are being 
 #     deleted or not in the right sequence.
 # - [x] write funcs to color different outputs different colors based on what they are - 
@@ -44,11 +49,12 @@ $parsync_dir $PARSYNCVER $PIDFILE $PIDFILE $prev_cache $lenPID $DISPOSE
 $rem_host $remote $rem_path $rem_user  $rootdir $rPIDs $sPIDs
 $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
 @SYSLOAD $TARGET $tmp $Totlsiz %UTILS $VERSION $OS $Linux $MacOSX $NETFILE $myIP
+$PERFQUERY $avgTCPrecv $avgTCPsend $avgRDMArecv $avgRDMAsend
 );
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.55 
-Sept 6th, 2018
+parsyncfp version 1.56 
+Dec 12th, 2018
 by Harry Mangalam <hjmangalam\@gmail.com>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -94,6 +100,7 @@ $DFLT_RSYNCOPTS = "-a -s"; # the default options to pass to rsync; blanked if de
 if (defined $VERSION) { print colored(['green'], $PARSYNCVER, "\n"); exit;}
 if (!defined $CHECKPERIOD) {$CHECKPERIOD = 3;}
 if (!defined $VERBOSE) {$VERBOSE = 2;}
+$PERFQUERY = 0;
 
 my $fpcheck = `which fpart`;
 if ($fpcheck eq "") {FATAL("There's no 'fpart' executable on your PATH. Did you install it?
@@ -162,6 +169,17 @@ $NETIF \nPlease specify the one you want to use via the '--interface' flag.\n";
       $NETIF = `/sbin/route -n | grep "^0.0.0.0" | awk '{print \$8}'`; chomp $NETIF;
       $myIP = `ifconfig $NETIF | grep 'inet ' | awk '{print \$2}' | cut -d: -f2`; chomp $myIP;
     }
+  }
+}
+my $pqpath = `which perfquery`;
+if ($NETIF =~ /ib/){
+  INFO("You've specified what looks like an Infiniband interface [$NETIF]...");
+  if ($pqpath ne "") {
+    $PERFQUERY = 1;
+    INFO(".. and you have 'perfquery installed, so RDMA bytes will be reported as well.");
+  } else {
+    $PERFQUERY = 0;
+    INFO(".. but you don't have 'perfquery' installed, so only TCP bytes will be reported.");
   }
 }
 
@@ -367,14 +385,13 @@ $ cyclecnt = 0;
 my $IFN = sprintf("%7s",$NETIF);
 
 my $day =`date +"%F"`; chomp $day;
-
-if ($VERBOSE == 0) {
-    print "        | Elapsed |   1m   |    MB/s   | Running || Susp'd  |      Chunks       [$day]
-  Time  | time(m) |  Load  | [$IFN] |   PIDs  ||  PIDs   | [UpTo] of [ToDo]\n";
+#                                     |     TCP / RDMA  out  |
+if ($VERBOSE == 0) { #  ..............|---------- / ---------|
+    print "        | Elapsed |   1m   |    [$IFN]   MB/s  | Running || Susp'd  |      Chunks       [$day]
+  Time  | time(m) |  Load  |     TCP / RDMA  out  |   PIDs  ||  PIDs   | [UpTo] of [ToDo]\n";
 }
 
 my $start_secs = `date  +"%s"`; 
-
 
 while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
   $rPIDs = "";
@@ -385,8 +402,8 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
 
      $day =`date +"%F"`; chomp $day; 
      
-     if ($VERBOSE > 1) {print "        | Elapsed |   1m   |    MB/s   | Running || Susp'd  |      Chunks       [$day]
-  Time  | time(m) |  Load  | [$IFN] |   PIDs  ||  PIDs   | [UpTo] of [ToDo]\n";}
+     if ($VERBOSE > 1) {print "        | Elapsed |   1m   |    [$IFN]   MB/s  | Running || Susp'd  |      Chunks       [$day]
+  Time  | time(m) |  Load  |     TCP / RDMA  out  |   PIDs  ||  PIDs   | [UpTo] of [ToDo]\n";}
   }
   ($rPIDs, $crr) = get_rPIDs($PIDFILE, $sPIDs);
 
@@ -417,32 +434,33 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
   
   # check cycles, print if exceed then reset counter.
   if ($cyclecnt++ > ($CHECKPERIOD - 4)) {
+    my $avgTCPsend;
+    if ($Linux) {
+        ($avgTCPrecv, $avgTCPsend, $avgRDMArecv, $avgRDMAsend) = getavgnetbw($NETIF, $CHECKPERIOD, $PERFQUERY); 
+        chomp $avgTCPsend;  $avgTCPsend =  ($avgTCPsend  / 1048576); # convert to MB
+        chomp $avgRDMAsend; $avgRDMAsend = ($avgRDMAsend / 262144); # convert to MB; use same divisor as rdma-tct-stats
+    } else {
+        my $RDMA_T1 = my $RDMA_T2 = 0;
+#        if ($DEBUG) {print "DEBUG: netstat lines next with myIP=[$myIP]\n";}
+        my $o1_bytes = `netstat -bi | grep $myIP | awk '{print \$10}'`; sleep $CHECKPERIOD;
+        my $o2_bytes = `netstat -bi | grep $myIP | awk '{print \$10}'`;
+        $avgTCPsend = ($o2_bytes - $o1_bytes) / $CHECKPERIOD / 1048576; # (1024^2) 
+    }
+    my $cur_secs = `date +"%s"`;
+    my $el_min = ($cur_secs - $start_secs) / 60; 
+    
+    # this should switch from scrolling to overwrite when VERBOSE < 2
+    # print out the line
+    if ($VERBOSE > 0) {
+        printf "%8s   %5.2f    %5.2f  %9.2f / %-9.2f       %2d    <>  %2d          [%d] of [%d]",
+    $rDATE, $el_min, $SYSLOAD[0],   $avgTCPsend ,$avgRDMAsend,   $NrPIDs, $NsPIDs, $CUR_FPI, $nbr_cur_fpc_fles;  
+    }
+    # and then over-write it or add a newline for scrolling data.
+    if ($VERBOSE == 1) { printf "\r";}
+    elsif ($VERBOSE >= 2) {printf "\n";}
 
-  my $avgsend;
-  if ($Linux) {
-    (my $avrecv, $avgsend) = getavgnetbw($NETIF, $CHECKPERIOD); 
-    chomp $avgsend; $avgsend = ($avgsend / 1048576);
-  } else {
-    if ($DEBUG) {print "DEBUG: netstat lines next with myIP=[$myIP]\n";}
-    my $o1_bytes = `netstat -bi | grep $myIP | awk '{print \$10}'`; sleep $CHECKPERIOD;
-    my $o2_bytes = `netstat -bi | grep $myIP | awk '{print \$10}'`;
-    $avgsend = ($o2_bytes - $o1_bytes) / $CHECKPERIOD / 1000000;
-  }
-  my $cur_secs = `date +"%s"`;
-  my $el_min = ($cur_secs - $start_secs) / 60; 
-  
-  # this should switch from scrolling to overwrite when VERBOSE < 2
-  # print out the line
-  if ($VERBOSE > 0) {
-    printf "%8s   %5.2f    %5.2f  %9.2f       %2d    <>  %2d          [%d] of [%d]",
-  $rDATE, $el_min, $SYSLOAD[0],   $avgsend ,   $NrPIDs, $NsPIDs, $CUR_FPI, $nbr_cur_fpc_fles;  
-  }
-  # and then over-write it or add a newline for scrolling data.
-  if ($VERBOSE == 1) { printf "\r";}
-  elsif ($VERBOSE >= 2) {printf "\n";}
-
-  if ($DEBUG) {print "\nDEBUG: rPIDs = $rPIDs; sPIDs = $sPIDs\n";}
-  $cyclecnt = 0; $hdr_cnt++;
+    if ($DEBUG) {print "\nDEBUG: rPIDs = $rPIDs; sPIDs = $sPIDs\n";}
+    $cyclecnt = 0; $hdr_cnt++;
   }
 ### SUSPEND OR CONTINUE RSYNCS for LOADBALANCING
   if ($SYSLOAD[0] > $MAXLOAD) {
@@ -665,33 +683,34 @@ sub get_rPIDs($$) {
   return ($rpids, $crr);
 }
 
-sub getavgnetbw ($$) { # call as ($avrecv, $avgsend) = getavgnetbw($NETIF, $CHECKPERIOD)
-    my ($avgrec,$avgtrans,$R1,$T1,$R2,$T2);
-    my $NETIF = shift; my $CHECKPERIOD = shift;
+sub getavgnetbw ($$$) { 
+# call as  (my $avgTCPrecv, $avgTCPsend, $avgRDMArecv, $avgRDMAsend) = getavgnetbw($NETIF, $CHECKPERIOD, $PERFQUERY); 
+    my ($avgrec,$avgtrans,$R1,$T1,$R2,$T2,$RDMA_T1,$RDMA_T2,$RDMA_R1,$RDMA_R2, $avgRDMAsend,$avgRDMArecv,$PQ);
+    $avgRDMAsend = $avgRDMArecv = 0;
+    my $NETIF = shift; my $CHECKPERIOD = shift; my $PQ = shift;
     $R1=`cat /sys/class/net/${NETIF}/statistics/rx_bytes`; 
     $T1=`cat /sys/class/net/${NETIF}/statistics/tx_bytes`;
+    if ($PQ) {
+      $RDMA_T1 = `perfquery -x | grep XmitData  | cut -f2 -d:  | sed -e 's/\\.*//g'`;  chomp $RDMA_T1;
+      $RDMA_R1 = `perfquery -x  | grep RcvData  | cut -f2 -d: | sed -e 's/\\.*//g'`;  chomp $RDMA_R1;
+    }
+    # now sleep
     sleep $CHECKPERIOD;
+    
     $R2=`cat /sys/class/net/${NETIF}/statistics/rx_bytes`; 
     $T2=`cat /sys/class/net/${NETIF}/statistics/tx_bytes`;
-    $avgrec = ($R2 - $R1);
-    $avgtrans = ($T2 - $T1); 
-    return ($avgrec, $avgtrans);
+    if ($PQ) {
+      $RDMA_T2 = `perfquery -x  | grep XmitData | cut -f2 -d: | sed -e 's/\\.*//g'`; chomp $RDMA_T2;
+      $RDMA_R2 = `perfquery -x  | grep RcvData  | cut -f2 -d: | sed -e 's/\\.*//g'`; chomp $RDMA_R2;
+      # print "[$RDMA_T2] - [$RDMA_T1]\n";
+      $avgRDMAsend = ( $RDMA_T2 - $RDMA_T1) / $CHECKPERIOD;
+      $avgRDMArecv = ( $RDMA_R2 - $RDMA_R1) / $CHECKPERIOD;
+    }
+    $avgrec = ($R2 - $R1) / $CHECKPERIOD;
+    $avgtrans = ($T2 - $T1) / $CHECKPERIOD; 
+    # print "getavgnetbw(): avgRDMAsend = $avgRDMAsend\n";
+    return ($avgrec, $avgtrans, $avgRDMArecv, $avgRDMAsend);
 }
-
-# below is the variant that uses a time period to check over that time.
-# sub getavgnetbw ($$) { # call as ($avrecv, $avgsend) = getavgnetbw($NETIF,$CHECKPERIOD)
-#     my ($avgrec,$avgtrans,$R1,$T1,$R2,$T2);
-#     my $NETIF = shift; my $CHECKPERIOD = shift;
-#     my $file = shift;   #, my $reps = shift;
-#     $R1=`cat /sys/class/net/$NETIF/statistics/rx_bytes`; 
-#     $T1=`cat /sys/class/net/$NETIF/statistics/tx_bytes`;
-#     sleep $CHECKPERIOD;
-#     $R2=`cat /sys/class/net/$NETIF/statistics/rx_bytes`; 
-#     $T2=`cat /sys/class/net/$NETIF/statistics/tx_bytes`;
-#     $avgrec = ($R2 - $R1) / $CHECKPERIOD;
-#     $avgtrans = ($T2 - $T1) / $CHECKPERIOD;
-#     return ($avgrec, $avgtrans);
-# }
 
 
 sub pause {
@@ -703,7 +722,7 @@ sub pause {
 sub INFO($) {
     my $msg = shift;
     print color('bold blue');
-    print "INFO: $msg \n";
+    print " INFO: $msg \n";
     print color('reset');
 }
 
@@ -711,7 +730,7 @@ sub INFO($) {
 sub WARN($) {
     my $msg = shift;
     print color('bold magenta');
-    print "WARN: $msg \n";
+    print " WARN: $msg \n";
     print color('reset');
 }
 
@@ -719,7 +738,7 @@ sub WARN($) {
 sub ERROR($) {
     my $msg = shift;
     print color('bold red');
-    print "ERROR: $msg \n";
+    print " ERROR: $msg \n";
     print color('reset');
 }
 
