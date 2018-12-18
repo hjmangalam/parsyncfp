@@ -393,6 +393,8 @@ if ($VERBOSE == 0) { #  ..............|---------- / ---------|
 
 my $start_secs = `date  +"%s"`; 
 
+$STILLRSYNCS=1;
+
 while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
   $rPIDs = "";
   # print the header
