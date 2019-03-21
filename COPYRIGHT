@@ -1,0 +1,54 @@
+...And The Small Print Taketh Away...
+
+Copyright (c) 2019 by Harry Mangalam <hjmangalam@gmail.com>
+
+    Permission to use, copy, modify, and distribute this software and its 
+    documentation is hereby granted, subject to the following restrictions
+    and understandings:
+
+      1) Any copy of this software or any copy of software derived
+         from it must include this copyright notice in full.
+
+      2) All materials or software developed as a consequence of the
+         use of this software or software derived from it must duly
+         acknowledge such use, in accordance with the usual standards
+         of acknowledging credit in academic research.
+         
+      3) The software may be used by anyone for any purpose, subject to the 
+      	Free Software Foundation's General Public License v3, which can be viewed
+      	here: https://www.gnu.org/licenses/gpl-3.0.en.html.
+         
+         Those persons or organizations wanting to use code derived from parsyncfp
+         in proprietary applications so as not to have their code 'infected'
+         by the FSF GPL have the option to license the code directly from from
+         the author under a separate license.  This option takes advantage of
+         the  so-called Dual Licensing policy, which is approved by the FSF.
+
+      4) This software is provided AS IS with NO WARRANTIES OF ANY KIND.  The
+         author shall have no liability with respect to the infringement of
+         copyrights, trade secrets or any patents by this software or any part
+         thereof.  In no event will the author be liable for any lost revenue
+         or profits or other special, indirect and consequential damages.
+
+      Inclusion of other software
+      ===========================
+      
+      This software uses or depends on code from other authors and packages that are
+      the copyright of the individual authors.  Their release policies are not in
+      conflict with  those of the GPL, as long as their code is not incorporated into 
+      parsyncfp.  The externally developed code is described below.
+
+      The use of the included code does not imply an endorsement of the parsyncfp
+      package by the individual authors.
+      
+      This software uses
+      - rsync (Andrew Tridgell and Paul Mackerrasas), <http://lists.samba.org>
+      - fpart (Ganael LAPLANCHE <ganael.laplanche@martymac.org>), 
+          <https://github.com/martymac/fpart>
+      - perfquery < hal.rosenstock [at] gmail.com >
+      - ibstat < hal.rosenstock [at] gmail.com >
+      - and many standard Linux utilities, any one of which could change 
+          output format at any time and hobble parsyncfp. These include:
+          ifconfig, ethtool, iwconfig, netstat, route, cat, ls, awk, grep, 
+          ps, wc, sort, tr, etc.
+      

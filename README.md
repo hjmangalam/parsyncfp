@@ -1,5 +1,5 @@
 # parsyncfp
-a parallel rsync wrapper in Perl
+a parallel rsync wrapper in Perl. Released under GPL v3.
 
 (Version changes moved to the bottom of this file)
 
@@ -13,8 +13,9 @@ chunk by chunk basis.  This allows pfp to begin transferring files before the
 complete recursive descent of the source dir is complete.  This feature can save many 
 hours of prep time on very large dir trees.
 
-Dependencies: In addition to the above "fpart", pfp also requires 2 other Perl-based utilities, [scut](http://moo.nac.uci.edu/~hjm/scut) or [via git](https://github.com/hjmangalam/scut) and [stats](http://moo.nac.uci.edu/~hjm/stats) or via the same git as scut.  
-
+parsyncfp requires 'perfquery' and 'ibstat', Infiniband utilities both written 
+by Hal Rosenstock < hal.rosenstock [at] gmail.com > if your use involves transit 
+over IB networks.
 
 pfp is primarily tested on Linux, but is being ported to MacOSX
 as well. 
@@ -200,6 +201,8 @@ The correct version of the above command is:
 
 
 ## Changes
+### 1.57 
+- added explicit GPL v3 licence 
 
 ### 1.56
 - added a better measurement of TCP bytes sent (via /proc/net/dev) 

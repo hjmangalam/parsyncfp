@@ -1,4 +1,11 @@
 #!/usr/bin/env perl
+# this software is Copyright Harry Mangalam <hjmangalam@gmail.com> 2019 and on.
+# parsyncfp is released under the GPLv3 License. <https://www.gnu.org/licenses/gpl-3.0.en.html>
+# see also: <https://en.wikipedia.org/wiki/GNU_General_Public_License>
+# Please see the file "COPYRIGHT" that should accompany this program.  
+# If not it is available at the parsyncfp github site: 
+#      https://github.com/hjmangalam/parsyncfp
+
 use strict;
 use Getopt::Long;      # for std option handling: -h --yadda=badda, etc
 use Socket;
@@ -9,13 +16,17 @@ use Term::ANSIColor;  # for alarms
 # after significant changes, update the tarball and cp to moo for distribution; update the github
 # fn="/home/hjm/bin/parsyncfp"; cd ; cp  $fn ~/parsyncfp/; tar -cvzf parsyncfp+utils.tar.gz parsyncfp; scp parsyncfp+utils.tar.gz moo:~/public_html/parsync ; 
 # copy to all the local hosts
-# scp $fn moo:~/public_html; scp $fn moo:~/bin;  scp $fn   dabrick:~/bin; ssh -t moo 'scp bin/parsyncfp hmangala@hpcs:/data/hpc/bin'; 
+ 
 
 # don't forget!!  using git!  Add changes to changelog in the README.md file
 # cd ~/gits/parsyncfp; cp ~/bin/parsyncfp .; git add parsyncfp README.md; git commit -m 'commit message'; git push
 # check github for bug reports.
  
 # TODO
+# - integrate pmj into pfp? use somthing like [xterm -e "cd /path/to/pmj/dir; pmj shell start file; wait"
+
+#    - --pmj=/path/to/pmj dir 
+#    - starts an xterm and sends output there, opens the gnuplot window
 # - [x] changed the calc for determining TCP network bandwidth to reference /proc/net/dev which should
 #       be more reliable across distro's and maybe even OSs.  However, this won't detect RDMA data.  For that,
 #       need perfquery.
@@ -30,7 +41,7 @@ use Term::ANSIColor;  # for alarms
 # - [x] done: fix bandwidth calculation subroutine.
 # - [x] done: check for fpart before running.
 # - [x] done: test for '-d' or --delete' in the rsyncopts line and refer to problem with this.
-# - test for # of chunk files generated.  emit warnings if goes above 2000 (admise to choose 
+# - test for # of chunk files generated.  emit warnings if goes above 2000 (advise to choose 
 #    a larger chunksize; or if less than NP. Don't assume a large # or even the same # as the NP #.
 # - [x] done: decouple the cycle time from the job start time. ie, keep monitoring the exit codes
 # and launch the next rsync immediately, don't wait for the checkperiod cycle, since that could be 
@@ -53,8 +64,8 @@ $PERFQUERY $avgTCPrecv $avgTCPsend $avgRDMArecv $avgRDMAsend
 );
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.56 
-Dec 12th, 2018
+parsyncfp version 1.57 
+Mar 20, 2019
 by Harry Mangalam <hjmangalam\@gmail.com>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -63,6 +74,7 @@ network connections to increase the amount of bandwidth it can use.
 The 'fp' variant uses 'fpart' to bypass the need for a full recursive 
 descent of the dir trees before the actual transfer starts. 
 Do NOT try to use rsync --delete options'.  More help with '--help'
+parsyncfp is distributed under the Gnu Public License (GPL) v3.
 VERSION
 
 if (! @ARGV) {usage();} # in case someone doesn't know what to do.
@@ -173,13 +185,13 @@ $NETIF \nPlease specify the one you want to use via the '--interface' flag.\n";
 }
 my $pqpath = `which perfquery`;
 if ($NETIF =~ /ib/){
-  INFO("You've specified what looks like an Infiniband interface [$NETIF]...");
+  INFO("You've specified what looks like an Infiniband interface [$NETIF]...\n");
   if ($pqpath ne "") {
     $PERFQUERY = 1;
-    INFO(".. and you have 'perfquery installed, so RDMA bytes will be reported as well.");
+    INFO(".. and you have 'perfquery installed, so RDMA bytes will be reported as well.\n");
   } else {
     $PERFQUERY = 0;
-    INFO(".. but you don't have 'perfquery' installed, so only TCP bytes will be reported.");
+    INFO(".. but you don't have 'perfquery' installed, so only TCP bytes will be reported.\n");
   }
 }
 
@@ -236,7 +248,7 @@ if (-d $parsync_dir) {
   elsif ($VERBOSE > 0) {pause();}
   system("rm -f $glob");
   if ($VERBOSE >=2 ) {
-    INFO("The fpart chunk files [$glob] are cleared .. continuing.")
+    INFO("The fpart chunk files [$glob] are cleared .. continuing.\n")
   }
 } elsif (! -d $parsync_dir) {
    make_path  $parsync_dir or FATAL("Can't create [ $parsync_dir ]");
@@ -309,7 +321,7 @@ $fnd2r =~ s/^\s+|\s+$//g ; # trim leading and trailing
 my $cmd = "fpart -v -L -z -s $FPARTSIZE_N -o $FP_ROOT $fnd2r  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE"; # captures the child PID!
 if ($DEBUG) {print "DEBUG: fpart fork cmd:\n[$cmd]\n";} sleep 5;
 if ($FPART_PID = fork) { # this actually takes a couple of seconds 
-    if ($VERBOSE >= 2) { INFO("Forking fpart.  Check [$FPART_LOGFILE] for errors if it hangs."); }
+    if ($VERBOSE >= 2) { INFO("Forking fpart.  Check [$FPART_LOGFILE] for errors if it hangs.\n"); }
 } else {
     system "$cmd";
     $FPART_PID = `cat $FP_PIDFILE`; chomp $FPART_PID;
@@ -317,7 +329,7 @@ if ($FPART_PID = fork) { # this actually takes a couple of seconds
 }
 # fpart has been forked; wait for enough chunkfiles to be written to start the rsyncs
 while (! -e $FP_PIDFILE) { sleep 1;
-    if ($VERBOSE >= 3) {INFO("Waiting for fpart to be forked..");}
+    if ($VERBOSE >= 3) {INFO("Waiting for fpart to be forked..\n");}
 }
 $FPART_PID = `cat $FP_PIDFILE`; chomp $FPART_PID;
 my $ready2start = my $waitcnt = $NBR_FP_FLES = 0;
@@ -326,11 +338,11 @@ my $fp1 = $FP_ROOT . ".1";
 my $done = 0;
 while ($ready2start == 0) {
 if (-e $fp0) {
-    if ($VERBOSE >= 3) {INFO("[$fp0] visible.");}
+    if ($VERBOSE >= 3) {INFO("[$fp0] visible.\n");}
     $NBR_FP_FLES++; $ready2start=1; 
 }
 $waitcnt++;
-if ($VERBOSE >= 3) {INFO("Waiting [$waitcnt]s for chunk files to be written");}
+if ($VERBOSE >= 3) {INFO("Waiting [$waitcnt]s for chunk files to be written\r");}
 sleep 1;
 }
 
@@ -341,7 +353,7 @@ my $FPCFS = "${FP_ROOT}."; # FP Chunk File Stem
 my $NBR_FP_FLES = `\\ls -U1 ${FPCFS}* | wc -l`; chomp $NBR_FP_FLES;
 $RSYNCS_GOING = $CUR_FPI = 0; # $CUR_FPI = current FP index
 
-if ($VERBOSE >= 2) {INFO("Starting the 1st [$NP] rsyncs ..");}
+if ($VERBOSE >= 2) {INFO("Starting the 1st [$NP] rsyncs ..\n");}
 my $sc = 0;
 while ($RSYNCS_GOING < $NP && $KEEPGOING) { #
   $CUR_FP_FLE = $FP_ROOT . "." . $CUR_FPI ; # the current fp chunkfile
@@ -562,7 +574,7 @@ Reminder: check the parsyncfp log [$logfile]
         # OR keep cycling continuously on a 1s loop and ONLY print out info every X cycles.  This is the easiest way. 
         if (-e $CUR_FP_FLE) {
             fixfilenames($CUR_FP_FLE, $ROOTDIR);  # check & fix for spaces, bad chars.
-            if ($VERBOSE >= 3) {my $tt = $CUR_FPI+1;  INFO("next chunk [$tt] of [$nbr_cur_fpc_fles]");}
+            if ($VERBOSE >= 3) {my $tt = $CUR_FPI+1;  INFO("next chunk [$tt] of [$nbr_cur_fpc_fles]\n");}
             system("$RSYNC_CMD"); # capture the bg job PID to PIDfile
             $CUR_FPI++;
         }
@@ -598,7 +610,7 @@ elsif ($DISPOSE =~ /c/ ) { # can it just be put into background?
   Reminder: check [$FPART_LOGFILE] for errors if there were errors.
   
   Thanks for using parsyncfp. Tell me how to make it better.
-  <hjmangalam\@gmail.com>");
+  <hjmangalam\@gmail.com>\n");
 }
 exit;
 
@@ -722,7 +734,7 @@ sub pause {
 sub INFO($) {
     my $msg = shift;
     print color('bold blue');
-    print " INFO: $msg \n";
+    print " INFO: $msg";
     print color('reset');
 }
 
@@ -817,13 +829,13 @@ sub fix_ssh_config {
         the run if you don't have ssh set correctly for the remote system, but the 
         transfer should still work.)
    
-If this mod of your ~/.ssh/config file is OK, hit [Enter].  Otherwise hit [s] to skip. ");
+If this mod of your ~/.ssh/config file is OK, hit [Enter].  Otherwise hit [s] to skip.\n ");
         my $tmp = <STDIN>; 
         if ($tmp !~ /[sS]/) {
             system ("echo -n \"#Next 2 lines added by parsyncfp\nForwardX11Trusted       yes\nForwardX11              yes\n\" >> $HOME/.ssh/config" );
             system("chmod 600 $HOME/.ssh/config");
             INFO("Your ~/.ssh/config file is set correctly.\n"); sleep 1;
-        } else {INFO("Your ~/.ssh/config was not changed."); sleep 1;}
+        } else {INFO("Your ~/.ssh/config was not changed.\n"); sleep 1;}
     }
 }
 
