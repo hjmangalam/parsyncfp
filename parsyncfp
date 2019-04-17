@@ -318,7 +318,7 @@ $fnd2r =~ s/^\s+|\s+$//g ; # trim leading and trailing
 # keeping the following line here as a reminder to think about how to better 
 # address this problem.
 #$fnd2r =~ s/ /\\ /g; # subs internal spaces with escaped spaces
-my $cmd = "fpart -v -L -z -s $FPARTSIZE_N -o $FP_ROOT $fnd2r  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE"; # captures the child PID!
+my $cmd = "fpart -v -L -z -s $FPARTSIZE_N -o $FP_ROOT \"$fnd2r\"  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE"; # captures the child PID!
 if ($DEBUG) {print "DEBUG: fpart fork cmd:\n[$cmd]\n";} sleep 5;
 if ($FPART_PID = fork) { # this actually takes a couple of seconds 
     if ($VERBOSE >= 2) { INFO("Forking fpart.  Check [$FPART_LOGFILE] for errors if it hangs.\n"); }
