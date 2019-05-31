@@ -3,6 +3,17 @@ a parallel rsync wrapper in Perl. Released under GPL v3.
 
 (Version changes moved to the bottom of this file)
 
+## IMPORTANT NOTE (May 31, 2019)
+Thanks to the long-suffering efforts of Jeff Dullnig, I've discovered that when parsyncfp goes thru 
+multiple suspend/unsuspend cycles, it fails to correctly rsync all the src files to the target.
+
+If the '--maxload' option is kept high enough to avoid any suspensions, it syncs correctly. 
+
+If you're using parsyncfp now, please be aware that if forked rsyncs cycle thru suspend / unsuspends
+you will probably not end up with a correct target.  I'll be working on this to determine if it can 
+be fixed or if that 'feature' has to be removed.
+
+
 ## Background
 
 parsyncfp (pfp) is the offspring of my [parsync](https://github.com/hjmangalam/parsync) 
@@ -101,6 +112,7 @@ be used to denote that option.<br>
 - --maxload|ml [f] (NP+2)  :  max system load - if sysload > maxload, an rsync proc will sleep for 10s
 - --chunksize|cs [s] (10G) : aggregate size of files allocated to one rsync  process.  Can specify in 'human' terms [100M, 50K, 1T] as well as integer bytes.
 - --rsyncopts|ro [s] : options passed to rsync as quoted string (CAREFUL!) this opt triggers a pause before executing to verify the command(+)
+- --fromlist|fl [s] ........... take explicit input file list from given file, 1 *fully qualified* path name per line.
 - --interface|i [s] : network interface to monitor (not use; see above)
 - --checkperiod|cp [i] (5) : sets the period in seconds between updates
 - --verbose|v [0-3] (2) : sets chattiness. 3=debug; 2=normal; 1=less; 0=none.    This only affects verbosity post-start; warning & error messages will still be printed.
@@ -161,6 +173,18 @@ where
 - includes '--nowait' to allow unattended scripting of parsyncfp
 
 
+###  Good example 4
+
+parsyncfp-list --NP=8 --chunksize=500k --fromlist=/home/hjm/dl550 \
+hjm@moo:/home/hjm/testparsync
+                            
+where
+
+- if you use the '--fromlist' option, you cannot use explicit source dirs
+  (all the files come from the file of files (which require full path names)
+- that the '--chunksize' format can use human abbreviations (k or K for kilo).
+
+
 ### Error Example 1
 
 ```
@@ -201,6 +225,12 @@ The correct version of the above command is:
 
 
 ## Changes
+
+### 1.58
+- added '--fromlist' to allow explicit lists of files to be pfp'ed.  Suggested by 
+Bill Abbott to support GPFS's mmapplypolicy to generate lists so that pfp can immediately 
+start moving data instead of iterating thru miles of already-synced files. Thanks, Bill.
+
 ### 1.57 
 - added explicit GPL v3 licence 
 

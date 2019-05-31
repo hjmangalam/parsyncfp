@@ -19,10 +19,17 @@ use Term::ANSIColor;  # for alarms
  
 
 # don't forget!!  using git!  Add changes to changelog in the README.md file
-# cd ~/gits/parsyncfp; cp ~/bin/parsyncfp .; git add parsyncfp README.md; git commit -m 'commit message'; git push
+# cd ~/gits/parsyncfp; cp ~/bin/parsyncfp .; git add parsyncfp README.md COPYRIGHT; git commit -m 'commit message'; git push
 # check github for bug reports.
  
 # TODO
+
+# - add option to use externally generated lists to pfp. ie for gpfs, or output from find, like:
+#    find som  -maxdepth 5 -mtime -90 -type f > newfiles
+# then "--fromlist newfiles"  and use fpart to generate the input to pfp using that list instead of using 
+# fpart to do the recursion.
+
+
 # - integrate pmj into pfp? use somthing like [xterm -e "cd /path/to/pmj/dir; pmj shell start file; wait"
 
 #    - --pmj=/path/to/pmj dir 
