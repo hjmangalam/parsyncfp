@@ -665,7 +665,8 @@ sub get_rPIDs($$) {
   # how many rsyncs are running?  Check the PIDFILE against the rsync PIDs that are running
   # if there are other rsyncs running, their PIDs won't be in the PIDFILE.
   # so have to do a diff of the PIDFILE vs all PIDs of rsyncs running.
-  my $ALL_SYS_RSYNC_PIDS = `ps aux | grep rsyn[c] |  awk '{print $2}' | sort -g | tr '\n' ' '`;  chop $ALL_SYS_RSYNC_PIDS;
+  my $ALL_SYS_RSYNC_PIDS = `ps aux | grep rsyn[c] |  awk '{print \$2}' | sort -g | tr '\n' ' '`;  chop $ALL_SYS_RSYNC_PIDS;
+  if ($DEBUG){print "\tDEBUG: PIDs of all rsync procs on the system: " . $ALL_SYS_RSYNC_PIDS . " \n"}
   $NASRP = @ASRP = split(/\s+/, $ALL_SYS_RSYNC_PIDS);
   open (PIDFILE, "<$pidfile") or FATAL("Can't open PIDFILE [$pidfile]'");
   # PIDs from the PIDFILE to compare system rsyncs (could be multiple going)
