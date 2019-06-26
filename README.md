@@ -3,7 +3,8 @@ a parallel rsync wrapper in Perl. Released under GPL v3.
 
 (Version changes moved to the bottom of this file)
 
-## See Changes at bottom.  The suspend/unsuspend bugs (there were actually 2) have been squashed (I think).
+## See Changes at bottom.  
+The suspend/unsuspend bugs (there were actually 2) have been squashed (I think).
 
 
 ## Background
@@ -227,10 +228,11 @@ where
 
 
 ###  Good example 4
+```
+parsyncfp --NP=8 --chunksize=500M --fromlist=/home/hjm/dl550 \
+hjm@moo:/home/hjm/test
+```
 
-parsyncfp-list --NP=8 --chunksize=500M --fromlist=/home/hjm/dl550 \
-hjm@moo:/home/hjm/testparsync
-                            
 where
 
 - if you use the '--fromlist' option, you cannot use explicit source dirs
