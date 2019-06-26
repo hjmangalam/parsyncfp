@@ -13,48 +13,53 @@ use Env qw(HOME PATH);
 use File::Path qw(remove_tree make_path);
 use Term::ANSIColor;  # for alarms
 
-# after significant changes, update the tarball and cp to moo for distribution; update the github
-# fn="/home/hjm/bin/parsyncfp"; cd ; cp  $fn ~/parsyncfp/; tar -cvzf parsyncfp+utils.tar.gz parsyncfp; scp parsyncfp+utils.tar.gz moo:~/public_html/parsync ; 
-# copy to all the local hosts
- 
+# copy to all the local hosts for local testing
+# fn="/home/hjm/bin/parsyncfp"; scp $fn dabrick:~/bin; scp $fn moo:~/bin; moo 'scp ~/bin/parsyncfp hmangala@hpcs:/data/hpc/bin'
 
-# don't forget!!  using git!  Add changes to changelog in the README.md file
+# after significant changes and testing, update the tarball and cp to moo for distribution; update the github
+# fn="/home/hjm/bin/parsyncfp"; cd ; cp  $fn ~/parsyncfp/; tar -cvzf parsyncfp+utils.tar.gz parsyncfp; scp parsyncfp+utils.tar.gz moo:~/public_html/parsync ; 
+
+# Add changes to changelog in the README.md file
 # cd ~/gits/parsyncfp; cp ~/bin/parsyncfp .; git add parsyncfp README.md COPYRIGHT; git commit -m 'commit message'; git push
 # check github for bug reports.
  
 # TODO
-
-# - add option to use externally generated lists to pfp. ie for gpfs, or output from find, like:
-#    find som  -maxdepth 5 -mtime -90 -type f > newfiles
-# then "--fromlist newfiles"  and use fpart to generate the input to pfp using that list instead of using 
-# fpart to do the recursion.
-
-
-# - integrate pmj into pfp? use somthing like [xterm -e "cd /path/to/pmj/dir; pmj shell start file; wait"
-
+# [x] done: rare condition where there are suspended rsyncs at end.  Have to check whether there are suspended PIDs
+#       and UNsuspend them to finish correctly.
+# [x] done: !! debug to find out why suspended/restarted rsyncs don't complete correctly. !!
+# [ ] - option for bytes IN or OUT.  Usually bytes go out and that's what's shown, but sometimes
+#         the transfer is coming from a network FS to a local disk and then you want bytes IN.
+# [x] done:- issue WARNING when the fpart chunk fle are greater than some #.  If the chunk size is set too
+#         small, there will be som many chunk files generated that the 'ls' can't handle them.  So 
+#         either catch when the # goes very high or change the way that pfp handles them.
+# [ ] - check that move targets are dirs, not files; issue warning if there are a lot of files
+# [x] done: add option to use externally generated lists to pfp. ie for gpfs, or output from find, like:
+#    find som  -maxdepth 5 -mtime -90 -type f > newfiles (--fromlist, --trimpath)
+# [x] done: allow user to generate lists with sizes to avoid stat'ing all the files. (--trustme|tm)
+# [x] done: then "--fromlist newfiles"  and use fpart to generate the input to pfp using that list 
+# instead of using fpart to do the recursion.
+# [?] integrate pmj with pfp? use something like [xterm -e "cd /path/to/pmj/dir; pmj shell start file; wait"
 #    - --pmj=/path/to/pmj dir 
 #    - starts an xterm and sends output there, opens the gnuplot window
-# - [x] changed the calc for determining TCP network bandwidth to reference /proc/net/dev which should
+# [x] done: changed the calc for determining TCP network bandwidth to reference /proc/net/dev which should
 #       be more reliable across distro's and maybe even OSs.  However, this won't detect RDMA data.  For that,
 #       need perfquery.
-# - [x] addded RDMA support (if the interface =~ ib, then it will try to use perfquery to measure the RDMA
+# [x] done: addded RDMA support (if the interface =~ ib, then it will try to use perfquery to measure the RDMA
 #       bandwidth
-# - [x] check the sequencing for the use of the alt-cache option to make sure that things are being 
+# [x] done: check the sequencing for the use of the alt-cache option to make sure that things are being 
 #     deleted or not in the right sequence.
-# - [x] write funcs to color different outputs different colors based on what they are - 
+# [x] done: write funcs to color different outputs different colors based on what they are - 
 #    blue for INFO, orange for WARNINGs, red for ERRORs, 
-# - check that fpart can generate at least the # of chunk that are > than NP (as below)
-# - port to MacOSX using hackintosh
-# - [x] done: fix bandwidth calculation subroutine.
-# - [x] done: check for fpart before running.
-# - [x] done: test for '-d' or --delete' in the rsyncopts line and refer to problem with this.
-# - test for # of chunk files generated.  emit warnings if goes above 2000 (advise to choose 
+# [x] done: check that fpart can generate at least the # of chunk that are > than NP (as below)
+# [?] - port to MacOSX using hackintosh
+# [x] done: fix bandwidth calculation subroutine.
+# [x] done: check for fpart before running.
+# [x] done: test for '-d' or --delete' in the rsyncopts line and refer to problem with this.
+# [x] done: test for # of chunk files generated.  emit warnings if goes above 2000 (advise to choose 
 #    a larger chunksize; or if less than NP. Don't assume a large # or even the same # as the NP #.
-# - [x] done: decouple the cycle time from the job start time. ie, keep monitoring the exit codes
+# [x] done: decouple the cycle time from the job start time. ie, keep monitoring the exit codes
 # and launch the next rsync immediately, don't wait for the checkperiod cycle, since that could be 
 # quite long
-# - handle immediate, top-level dirs 
-
 
 use vars qw($allPIDs $ALL_SYS_RSYNC_PIDS $ch $CHECKPERIOD $cmd 
 $crr $CUR_FP_FLE $CUR_FPI $DATE $dcnt $DEBUG @DIRS @DIRS2SYNC $dirtmp 
@@ -67,25 +72,24 @@ $parsync_dir $PARSYNCVER $PIDFILE $PIDFILE $prev_cache $lenPID $DISPOSE
 $rem_host $remote $rem_path $rem_user  $rootdir $rPIDs $sPIDs
 $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
 @SYSLOAD $TARGET $tmp $Totlsiz %UTILS $VERSION $OS $Linux $MacOSX $NETFILE $myIP
-$PERFQUERY $avgTCPrecv $avgTCPsend $avgRDMArecv $avgRDMAsend
+$PERFQUERY $avgTCPrecv $avgTCPsend $avgRDMArecv $avgRDMAsend 
+$WARN_FPART_FILES $MAX_FPART_FILES $SKIP_FPART_CHECK $FROMLIST $TRIMPATH $tf
+$TRUSTME $N @A 
 );
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.57 
-Mar 20, 2019
+parsyncfp version 1.60 (Dullnig)
+June 24, 2019
 by Harry Mangalam <hjmangalam\@gmail.com>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
 'rsync' to provide some load balancing and parallel operation across
 network connections to increase the amount of bandwidth it can use.
-The 'fp' variant uses 'fpart' to bypass the need for a full recursive 
+This 'fp' variant uses 'fpart' to bypass the need for a full recursive 
 descent of the dir trees before the actual transfer starts. 
 Do NOT try to use rsync --delete options'.  More help with '--help'
 parsyncfp is distributed under the Gnu Public License (GPL) v3.
 VERSION
-
-if (! @ARGV) {usage();} # in case someone doesn't know what to do.
-
 
 &GetOptions(
   "startdir|sd=s"    =>   \$ROOTDIR,     # Have to be able to set rootdir -> SRC in rsync
@@ -94,6 +98,9 @@ if (! @ARGV) {usage();} # in case someone doesn't know what to do.
   "NP|np=i"          =>   \$NP,          # number of rsync processes to start
   "chunksize|cs=s"   =>   \$FPARTSIZE,   # the size that fpart chunks (allow PpTtGgMmKk)
   "checkperiod|cp=i" =>   \$CHECKPERIOD, # # of sec between system load checks
+  "fromlist|fl=s"    =>   \$FROMLIST,    # take list of input files from file instead of fpart recursion.
+  "trimpath|tp=s"    =>   \$TRIMPATH,    # trim the string from the front of the file path.
+  "trustme|tm!"      =>   \$TRUSTME,     # sizes in listfile are correct; don't bother w/ stat
   "maxbw=i"          =>   \$MAXBW,       # max bw to use (--bwlimit=KBPS passthru to rsync)
   "maxload|ml=f"     =>   \$MAXLOAD,     # max system load - if > this, sleep rsyncs
   "email=s"          =>   \$EMAIL,       # email to notify when finished
@@ -106,11 +113,16 @@ if (! @ARGV) {usage();} # in case someone doesn't know what to do.
   "debug|d!"         =>   \$DEBUG,       # developer-level info; (historical) alias for '-v 3'
 );
 
-## Set up run-permanent variables.
+# reset colors
+print STDERR color('reset');
+print STDOUT color('reset');
 
+## Set up run-permanent variables.
 $DATE=`date +"%T_%F" | sed 's/:/./g' `; chomp $DATE;
 if (! defined $ALTCACHE) {$parsync_dir = $HOME . "/.parsyncfp";}
-else {$parsync_dir = $ALTCACHE; }  #mkdir $parsync_dir; !!!
+else {$parsync_dir = $ALTCACHE; }
+if (! -d "$parsync_dir") {mkdir "$parsync_dir" or FATAL("Can't create the required parsyncfp logging dir [$parsync_dir]");}
+#mkdir -p $parsync_dir 
 $NETFILE = "/proc/net/dev";
 $OS = `uname -s`; chomp $OS;
 $Linux = $MacOSX = 0;
@@ -120,6 +132,17 @@ if (defined $VERSION) { print colored(['green'], $PARSYNCVER, "\n"); exit;}
 if (!defined $CHECKPERIOD) {$CHECKPERIOD = 3;}
 if (!defined $VERBOSE) {$VERBOSE = 2;}
 $PERFQUERY = 0;
+$WARN_FPART_FILES = 2000; # issue warning at this point.
+$MAX_FPART_FILES  = 5000; # die at this point
+
+if (! @ARGV) {usage();} # in case someone doesn't know what to do.
+
+
+# DEBUG: set up a special file to log suspend and unsupends PIDs to see where they get mixed up.
+# number the suspended PIDs to see when / if they get unsuspended.
+open (SUSLOG, "> $parsync_dir/suspend.log") or FATAL("Can't open SUSLOG.");
+my $susp_cnt   = 0;
+my $unsusp_cnt = 0;
 
 my $fpcheck = `which fpart`;
 if ($fpcheck eq "") {FATAL("There's no 'fpart' executable on your PATH. Did you install it?
@@ -210,13 +233,14 @@ else {$MAXBW = int($MAXBW / $NP + 0.5);} # users expect total maxbw; so have to 
 if (! defined $MAXLOAD) {$MAXLOAD = $NP + 2 ;} #  + 1 for IO load
 if (! defined $ROOTDIR) {$ROOTDIR = `pwd`; chomp $ROOTDIR;}  # where all dirs must be rooted.
 if (! defined $FPARTSIZE) {$FPARTSIZE = "10G"; $FPARTSIZE_N = 104857600;} # default is 10Gish
-elsif ($FPARTSIZE =~ /[PpTtGgMmKk]/) {$FPARTSIZE_N = ptgmk($FPARTSIZE); }
+elsif ($FPARTSIZE < 0) {$FPARTSIZE = $FPARTSIZE * -1; $SKIP_FPART_CHECK = 1;} # Tells check to ignore huge #s of chunkfiles
+if ($FPARTSIZE =~ /[PpTtGgMmKk]/) {$FPARTSIZE_N = ptgmk($FPARTSIZE); }
 else {$FPARTSIZE_N = $FPARTSIZE;}
-if ($DEBUG) {&debug(__LINE__, "FPARTSIZE = $FPARTSIZE\nFPARTSIZE_N = $FPARTSIZE_N");}
+if ($DEBUG) {debug(__LINE__, "FPARTSIZE set to: [$FPARTSIZE]\nFPARTSIZE_N set to [$FPARTSIZE_N]");}
 
 # fix .ssh/config file to eliminate wonky errors.
 fix_ssh_config();
-
+$IF_SPEED = 0;
 # ?? Is this nec anymore?  If so, need to bring it up to date with the new naming conventions
 # see: https://goo.gl/kDLr8b
 # get some network info
@@ -230,15 +254,15 @@ elsif ($NETIF =~ /wlan/) {
 }
 chomp $IF_SPEED;
 
-if ($DEBUG){
-  print "\tDEBUG: Using network interface [$NETIF] with connection quality [$IF_SPEED]\n\n";}
-  if ($SYSLOAD[0] < $MAXLOAD){
+if ($DEBUG) { debug(__LINE__, "Using network interface [$NETIF] with connection quality [$IF_SPEED]"); }
+  
+if ($SYSLOAD[0] < $MAXLOAD){
   if ($DEBUG){
-    print "\n\tDEBUG: 1m load is [$SYSLOAD[0]] and the 1m Load:#CPU ratio is [$LOAD1mratio] ( [$NCPUs] CPU cores).
-	    OK to continue.\n "
+    debug(__LINE__, "1m load is [$SYSLOAD[0]] and the 1m Load:#CPU ratio is [$LOAD1mratio] ( [$NCPUs] CPU cores).
+    OK to continue.");
   }
 } else {
-  WARN("1m System load is > [$SYSLOAD[0]].  The 1m Load:#CPU ratio is [$LOAD1mratio].
+  WARN("1m loadavg is > [$SYSLOAD[0]].  The 1m Load:#CPU ratio is [$LOAD1mratio].
   Continue? [Cntrl+C to interrupt; Enter to continue]");
   pause();
 }
@@ -260,7 +284,6 @@ if (-d $parsync_dir) {
 } elsif (! -d $parsync_dir) {
    make_path  $parsync_dir or FATAL("Can't create [ $parsync_dir ]");
 }
-
 if (! -d $FP_ROOT_DIR) {mkdir $FP_ROOT_DIR or FATAL("Can't make 'FP_ROOT_DIR' [$FP_ROOT_DIR]");}
 $FP_ROOT = $FP_ROOT_DIR . "/f";  # the root name of the fpart chunk files f.1, etc
 $PIDFILE = $FP_ROOT_DIR . '/' . "rsync-PIDs" . '-' . $DATE;
@@ -282,23 +305,82 @@ if ($TARGET =~ /~/) { FATAL("You defined the target dir with a '~': [$TARGET].
 # now process the dirs
 $dcnt = 0;
 $fnd2r = "";  # zero the list of 'files 'n' dirs to rsync'
-$dirtmp = shift; # should only be dir/files left once getopt finishes (see above)
+#$dirtmp = shift; # should only be dir/files left once getopt finishes (see above)
 
-# If there are no files or dirs defined, take the current dir
-if (!defined $dirtmp) { $dirtmp = `pwd`;}
-while (defined $dirtmp) { # should work on explicitly named dirs as well as globs.
-  $dirtmp = $ROOTDIR . '/' . $dirtmp;
-  if (! -r $dirtmp){ # quick check to see if its readable.
-    WARN("[$dirtmp] isn't readable; 
-    either it's not where you think it is or you need to escalate your privs.  
-    Regardless, it won't be transferred in this run.");
-    if ($NOWAIT){ sleep 3;}
-    elsif ($VERBOSE > 0) {pause();}
-  } else {  # otherwise, add the file to list to be chunked and  transferred.
-    $fnd2r .= $dirtmp . " ";
-  }
-  $dirtmp = shift;
-}
+# only do this next stanza if NOT taking files from the '$FROMLIST
+if (!defined $FROMLIST) {
+    $dirtmp = shift; # should only be dir/files left once getopt finishes (see above)
+    if ($DEBUG) {debug(__LINE__, "Composing the new fpart target dirtmp in a loop.");} 
+    # If there are no files or dirs defined, take the current dir
+    if (!defined $dirtmp) { $dirtmp = `pwd`;}
+    while (defined $dirtmp) { # should work on explicitly named dirs as well as globs.
+        $dirtmp = $ROOTDIR . '/' . $dirtmp;
+        if (! -r $dirtmp){ # quick check to see if its readable.
+            WARN("[$dirtmp] isn't readable; 
+            either it's not where you think it is or you need to escalate your privs.  
+            Regardless, it won't be transferred in this run.");
+            if ($NOWAIT){ sleep 3;}
+            elsif ($VERBOSE > 0) {pause();}
+        } else {  # otherwise, add the file to list to be chunked and  transferred.
+            $fnd2r .= $dirtmp . " ";
+            if ($DEBUG) {debug(__LINE__, "Looping to add the fpart target: [$fnd2r]");} 
+        }
+        $dirtmp = shift;
+    }
+} else { # if $FROMLIST s defined, is $TRIMPATH defined? if so, is it valid?  End with a '/'?
+    $tf="/tmp/pfp.tmp";
+    if (defined $TRIMPATH) {
+        $ROOTDIR = "$TRIMPATH";
+        if (-e $TRIMPATH && -d $TRIMPATH && -r $TRIMPATH) {
+            INFO("The TRIMPATH you specified exists, is a dir, and is readable.\n");
+            $TRIMPATH = trim($TRIMPATH);
+            # print "TRIMPATH = [$TRIMPATH]\n";
+            if ($TRIMPATH =~ m%^/*/$%) { # $TRIMPATH has to begin with a '/' but NOT end with one.
+                $TRIMPATH = chop $TRIMPATH;
+                INFO("Chopped a '/' from the TRIMPATH");
+            }
+            # now process the input file to trim the TRIMPATH
+            if (-e $tf) {unlink $tf or FATAL("Temp file [$tf] exists and can't be deleted.\n");}
+            open (CFL, "<$FROMLIST") or FATAL("Can't open FROMLIST [$FROMLIST]'");
+            open (NFL, ">$tf") or FATAL("Can't open TEMPFILE [$tf]'");
+            my $lc=0;
+            while (<CFL>) {
+                #print "\nCFL input: [$_]\n";
+                $lc++;
+                if ($_ =~ /$TRIMPATH/) { # this will now hit the top-level dir line alone since it will now be '/home/hjm'
+                    # print "yup ";
+                    $_ =~ s%$TRIMPATH%%;  # kill the '/home/hjm'
+                    #print "\npost subst: [$_]"; #sleep 1;
+                    my $TT;
+                    if ($TRUSTME){
+                      $N = @A = split(/\t/, $_);
+                      my $tt = substr($A[1], 1);
+                      $TT = $A[0] . "\t" . $tt;
+                      #print "\nTRUSTME OUTPUT: [$TT]";
+                    } else { $TT =  substr($_, 1);} # and now the leftover leading '/' is gone as well
+                    #print "\nTT: [$TT]";
+                    print NFL $TT;
+                    #sleep 1;
+                } else { # if $TRIMPATH = '/home/hjm/' subst /home/hjm/nacs/hpc -> nacs/hpc
+                    chomp;
+                    print STDERR "Warning: [$_] in FROMLIST [$FROMLIST] line [$lc] doesn't have a [$TRIMPATH]\n";
+                }
+            }
+            # print "NFL done printing\n";
+        }
+    }
+    #don't want to change the FROMLIST since it may have taken a long time to generate, so use the $tf as input to fpart
+    close CFL; close NFL;  # just close them, don't delete, cp, or mv them.
+    #unlink "$FROMLIST" or die "FATAL: Couldn't rm [$FROMLIST]";
+    #move("$tf","$FROMLIST");  
+    
+} 
+
+#######
+#exit;
+#######
+
+
 $#ARGV++; # now incr to allow the TARGET to be captured.
 my @cachefiles = (); # will populate with list of cachefiles to process together.
 
@@ -325,12 +407,28 @@ $fnd2r =~ s/^\s+|\s+$//g ; # trim leading and trailing
 # keeping the following line here as a reminder to think about how to better 
 # address this problem.
 #$fnd2r =~ s/ /\\ /g; # subs internal spaces with escaped spaces
-my $cmd = "fpart -v -L -z -s $FPARTSIZE_N -o $FP_ROOT $fnd2r  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE"; # captures the child PID!
-if ($DEBUG) {print "DEBUG: fpart fork cmd:\n[$cmd]\n";} sleep 5;
+my $fpartcmd = "";
+if (defined $FROMLIST) {
+    # check to see if it exists & is a file & is readable
+    if (-e $FROMLIST && -f $FROMLIST && -r $FROMLIST) {
+        if ($VERBOSE >= 2) { INFO("Alternative file list is readable; converting list to chunks.\n"); }
+        # 
+    } else { FATAL("The 'fromlist file [$FROMLIST] doesn't exist,\nisn't a file, or isn't readable."); }
+    #convert to chunks with fpart
+    # following fpart uses the realtime option (-L) so that the code support should be same as for the original
+    # and capture the child PID!
+    my $AFLAG = "";
+    if ($TRUSTME) {$AFLAG = "-a "; } # if user specs the format that includes sizes
+    $fpartcmd="cd $TRIMPATH; fpart -v -L -s $FPARTSIZE_N $AFLAG -i $tf -o $FP_ROOT 2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
+} else { # use the full recursive fpart
+    # capture the child PID!
+    $fpartcmd = "fpart -v -L -z -s $FPARTSIZE_N -o $FP_ROOT $fnd2r  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE"; 
+}
+if ($DEBUG) {debug(__LINE__, "fpart fork cmd:\n[$fpartcmd]");} 
 if ($FPART_PID = fork) { # this actually takes a couple of seconds 
     if ($VERBOSE >= 2) { INFO("Forking fpart.  Check [$FPART_LOGFILE] for errors if it hangs.\n"); }
 } else {
-    system "$cmd";
+    system "$fpartcmd";
     $FPART_PID = `cat $FP_PIDFILE`; chomp $FPART_PID;
     exit(0); # it's forked, now exit this stanza
 }
@@ -349,7 +447,7 @@ if (-e $fp0) {
     $NBR_FP_FLES++; $ready2start=1; 
 }
 $waitcnt++;
-if ($VERBOSE >= 3) {INFO("Waiting [$waitcnt]s for chunk files to be written\r");}
+if ($VERBOSE >= 3) {INFO("Waiting [$waitcnt]s for chunk files to be written\n");}
 sleep 1;
 }
 
@@ -368,11 +466,12 @@ while ($RSYNCS_GOING < $NP && $KEEPGOING) { #
     fixfilenames($CUR_FP_FLE, $ROOTDIR);  # check & fix for spaces, bad chars.
     # entire rsync command and PID capture (used in total of 2 places)
     $logfile = $parsync_dir . '/' ."rsync-logfile-" . $DATE . "_" . $CUR_FPI;
-    $RSYNC_CMD = "rsync  --bwlimit=$MAXBW  $RSYNCOPTS -a -s --log-file=$logfile --files-from=$CUR_FP_FLE  $ROOTDIR  $TARGET  & echo \"\${!}\" >> $PIDFILE";
+    $RSYNC_CMD = "cd $TRIMPATH && rsync  --bwlimit=$MAXBW  $RSYNCOPTS -a -s --log-file=$logfile --files-from=$CUR_FP_FLE  $ROOTDIR  $TARGET  & echo \"\${!}\" >> $PIDFILE";
+    # WARN("$RSYNC_CMD");
     # there will be as many logfiles as fp chunkfiles.
     # ie LOTS. but they can be deleted after the run has been verified..
     # TODO don't know if we need this logfile.
-    if ($DEBUG) {&debug(__LINE__, "Complete rsync cmd = [$RSYNC_CMD]");}
+    if ($DEBUG) { debug(__LINE__, "Complete rsync cmd = [$RSYNC_CMD]"); }
     system("$RSYNC_CMD"); # launch rsync and capture the bg job PID to PIDfile
     $CUR_FPI++;
     $RSYNCS_GOING++;
@@ -386,6 +485,8 @@ while ($RSYNCS_GOING < $NP && $KEEPGOING) { #
     }
   }
 }  #while ($RSYNCS_GOING < $NP && $KEEPGOING)
+
+if ($DEBUG) {debug(__LINE__,"OUT OF RSYNC STARTUP LOOP");}
 
 # so at this point either we've loaded all the rsyncs up to NP or we've completely finished.
 # If the latter, say good bye.  If the former, then we have to keep launching
@@ -406,7 +507,7 @@ my $IFN = sprintf("%7s",$NETIF);
 my $day =`date +"%F"`; chomp $day;
 #                                     |     TCP / RDMA  out  |
 if ($VERBOSE == 0) { #  ..............|---------- / ---------|
-    print "        | Elapsed |   1m   |    [$IFN]   MB/s  | Running || Susp'd  |      Chunks       [$day]
+    print "        | Elapsed |   1m   |    [$IFN](MB/s)   | Running || Susp'd  |      Chunks       [$day]
   Time  | time(m) |  Load  |     TCP / RDMA  out  |   PIDs  ||  PIDs   | [UpTo] of [ToDo]\n";
 }
 
@@ -448,7 +549,7 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
   # check fpart to see if it's still running..
   $FPART_RUNNING = `ps aux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
 
-  if ($rPIDs eq "" ){$rPIDs = "No running PIDs; will start more next cycle"}
+  if ($rPIDs eq "" ){$rPIDs = "-"}
   my $rDATE=`date +"%T" | sed 's/:/./g' `; chomp $rDATE;
   
   # check cycles, print if exceed then reset counter.
@@ -460,7 +561,6 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
         chomp $avgRDMAsend; $avgRDMAsend = ($avgRDMAsend / 262144); # convert to MB; use same divisor as rdma-tct-stats
     } else {
         my $RDMA_T1 = my $RDMA_T2 = 0;
-#        if ($DEBUG) {print "DEBUG: netstat lines next with myIP=[$myIP]\n";}
         my $o1_bytes = `netstat -bi | grep $myIP | awk '{print \$10}'`; sleep $CHECKPERIOD;
         my $o2_bytes = `netstat -bi | grep $myIP | awk '{print \$10}'`;
         $avgTCPsend = ($o2_bytes - $o1_bytes) / $CHECKPERIOD / 1048576; # (1024^2) 
@@ -478,14 +578,32 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
     if ($VERBOSE == 1) { printf "\r";}
     elsif ($VERBOSE >= 2) {printf "\n";}
 
-    if ($DEBUG) {print "\nDEBUG: rPIDs = $rPIDs; sPIDs = $sPIDs\n";}
+    if ($DEBUG) {print STDERR "DEBUG: running PIDs = $rPIDs; suspended PIDs = $sPIDs.\n";}
     $cyclecnt = 0; $hdr_cnt++;
   }
+  my $warncount = 0;
+  ### INSERT test to check that $nbr_cur_fpc_fles is < 20,000.  
+  if ($nbr_cur_fpc_fles > $WARN_FPART_FILES && $warncount < 1) {
+    if ($VERBOSE >= 2) {WARN("You've exceeded [$WARN_FPART_FILES] chunk files.  
+Are you sure you've set the chunk size (--chunksize) appropriately for this transfer?
+If the count goes to [$MAX_FPART_FILES], this transfer will abort. See the help about this.
+"); $warncount++}
+    if ($nbr_cur_fpc_fles > $MAX_FPART_FILES && ! $SKIP_FPART_CHECK) {
+      FATAL("You've now exceeded [$MAX_FPART_FILES] chunk files, the maximum 
+recommended for this utility. Please increase the '--chunksize' 
+parameter significantly. If there's a good reason for exceeding it, 
+you can force the internal limit to be ignored by specifying it as 
+a negative number (--chunksize -10GB) the next time. However if you 
+do this, you will probably run into the string limit for 'ls'.
+")}
+  }
+  
+  
 ### SUSPEND OR CONTINUE RSYNCS for LOADBALANCING
   if ($SYSLOAD[0] > $MAXLOAD) {
     # suspend a PID; then loop as normal. If still high, will continue to
     # suspend PIDs until there's none left.
-    if ($DEBUG) {print "\nDEBUG: System load [$SYSLOAD[0]] is > MAXLOAD [$MAXLOAD].  Will try to suspend a running rsync to shed load.\n";}
+    if ($DEBUG) {debug(__LINE__, "System load [$SYSLOAD[0]] is > MAXLOAD [$MAXLOAD].  Will try to suspend a running rsync to shed load.");}
     # reassign a new list from ONLY RUNNING PIDs to $rPIDs (refresh $rPIDs)
     # this cmd picks up both suspended and running PIDs- have to remove the suspended ones.
     # in an efficient way.
@@ -503,21 +621,29 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
     if ($rPIDs =~ /\d+/){ # if any still left
       my $N = my @raPIDs = split(/\s+/, $rPIDs); my $e = 0; # @raPIDs = temp array to carry currently running PIDs
       while ($e <= $N && $raPIDs[$e] !~ /\d+/){$e++};
-      if ($DEBUG) {print "\t\tDEBUG:got one: [$raPIDs[$e]]; will now suspend it\n";}
+      if ($DEBUG) {debug(__LINE__, "DEBUG:[suspend] got one: [$raPIDs[$e]]; will now suspend it.");}
       kill 'STOP', $raPIDs[$e];
+      
+      $susp_cnt++;
+      print SUSLOG "Suspend  \t$susp_cnt\t($unsusp_cnt)\t$raPIDs[$e]\n";
+      
       if ($sPIDs !~ /$raPIDs[$e]/) { # If it's not there already
-	$sPIDs = "$sPIDs" . ' ' . "$raPIDs[$e]"; # transfer rPID to sPID.
-	$rPIDs =~ s/$raPIDs[$e]//g; # only then delete that PID fr the rPID string
+	    $sPIDs = "$sPIDs" . ' ' . "$raPIDs[$e]"; # transfer rPID to sPID.
+	    $rPIDs =~ s/$raPIDs[$e]//g; # only then delete that PID fr the rPID string
       }
     } else { # there aren't any more PIDs left - all done or killed off.'
-      if ($VERBOSE >= 2) {WARN("No more running rsync PIDs left [$rPIDs].  All rsyncs are suspended [$sPIDs].");}
+      if ($VERBOSE >= 2) {WARN("No more running rsync PIDs left.");}
     }
   } elsif ($sPIDs =~ /\d+/) { # if there are sPIDs, unsuspend them one by one
     # split em
     my $N = my @saPIDs = split(/\s+/, $sPIDs); my $e = 0;
     while ($e <= $N && $saPIDs[$e] !~ /\d+/){$e++};
-    if ($DEBUG) { print "\t\tDEBUG:got one: [$saPIDs[$e]]; will now UNsuspend it\n";}
+    if ($DEBUG) { debug(__LINE__, "[unsuspend] got one: [$saPIDs[$e]]; will now UNsuspend it.");}
     kill 'CONT', $saPIDs[$e];
+    
+    $unsusp_cnt++;
+    print SUSLOG "UNsuspend\t$unsusp_cnt\t($susp_cnt)\t$saPIDs[$e]\n";
+    
     $rPIDs = "$rPIDs" . ' ' . "$saPIDs[$e]"; # transfer sPID to rPID.
     $sPIDs =~ s/$saPIDs[$e]//g; # delete that PID fr the sPID string
   } # end of 'SUSPEND OR CONTINUE to LOADBALANCE.' test loop
@@ -565,7 +691,7 @@ Reminder: check the parsyncfp log [$logfile]
             exit;
         }
         while  (($CUR_FPI >= $nbr_cur_fpc_fles) && $fparts_already_running ne '') {
-            if ($DEBUG) {print "DEBUG: CUR_FPI=$CUR_FPI >= nbr_cur_fpc_fles=$nbr_cur_fpc_fles?\n";}
+            if ($DEBUG) {debug(__LINE__, "CUR_FPI=$CUR_FPI >= nbr_cur_fpc_fles=$nbr_cur_fpc_fles?");}
             if ($VERBOSE >= 2) {INFO("Waiting for fpart to get ahead of the transfer..\r"); }
             $nbr_cur_fpc_fles = `\\ls -U1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
             $fparts_already_running = `ps aux | grep 'fpar[t]'`; chomp $fparts_already_running;
@@ -574,8 +700,8 @@ Reminder: check the parsyncfp log [$logfile]
         $logfile = $parsync_dir . '/' ."rsync-logfile-" . $DATE . "_" . $CUR_FPI;
         $CUR_FP_FLE = "${FP_ROOT}.${CUR_FPI}" ; # generate the next fpart chunk file with $CUR_FPI
         $nbr_cur_fpc_fles = `\\ls -U1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
-        $RSYNC_CMD = "rsync  --bwlimit=$MAXBW -a -s --log-file=$logfile $RSYNCOPTS  --files-from=$CUR_FP_FLE  $ROOTDIR  $TARGET & echo \"\${!}\" >> $PIDFILE";
-        if ($DEBUG) {print "\nDEBUG: Starting [$RSYNC_CMD]\n"; }
+        $RSYNC_CMD = "cd $TRIMPATH && rsync  --bwlimit=$MAXBW -a -s --log-file=$logfile $RSYNCOPTS  --files-from=$CUR_FP_FLE  $ROOTDIR  $TARGET & echo \"\${!}\" >> $PIDFILE";
+        if ($DEBUG) {debug(__LINE__, "Starting [$RSYNC_CMD]"); }
 
         # check status in a 1s loop checking to start extra rsyncs do we don't wait any more than 1s
         # OR keep cycling continuously on a 1s loop and ONLY print out info every X cycles.  This is the easiest way. 
@@ -583,6 +709,7 @@ Reminder: check the parsyncfp log [$logfile]
             fixfilenames($CUR_FP_FLE, $ROOTDIR);  # check & fix for spaces, bad chars.
             if ($VERBOSE >= 3) {my $tt = $CUR_FPI+1;  INFO("next chunk [$tt] of [$nbr_cur_fpc_fles]\n");}
             system("$RSYNC_CMD"); # capture the bg job PID to PIDfile
+            #if ($DEBUG) {debug(__LINE__, "Starting [$RSYNC_CMD]"); }
             $CUR_FPI++;
         }
     }
@@ -590,10 +717,9 @@ Reminder: check the parsyncfp log [$logfile]
   }
   # sleep 1;
   $NBR_FP_FLES = `\\ls -U1 ${FPCFS}* | wc -l`; chomp $NBR_FP_FLES; # get current # of chunks
-  if ($rPIDs =~ /\d+/) {
-    $STILLRSYNCS = 1;
-    
-  }
+
+  # need to check both running and suspended PIDs
+  if ($rPIDs =~ /\d+/ || $sPIDs =~ /\d+/) { $STILLRSYNCS = 1; }
   else {$STILLRSYNCS = 0;}
 }  # while ($CUR_FPI < $NBR_FP_FLES )
 
@@ -641,17 +767,16 @@ sub check_utils {
       PATH variable to include it.");
     } else {
       $UTILS{$util} = $utilpath;
-      if ($DEBUG){print "\tEVAL: Found [$util] at [$utilpath].\n"}
+      if ($DEBUG){debug(__LINE__, "Found [$util] at [$utilpath].")}
     }
   }
 }
 
 # usage:  ($rPIDs, $crr) = get_rPIDs($PIDFILE, $sPIDs);
-sub get_rPIDs($$) {
+sub get_rPIDs {
 # Inputs
   my $pidfile = shift; # string name of PIDFILE
   my $spids = shift;   # suspended PIDs in a string.
- 
   my @aprPIDs = ();
   my $NSusPIDs = 0; 
   my @SusPIDs;
@@ -660,12 +785,12 @@ sub get_rPIDs($$) {
   my @ASRP;  # All System Rsync PIDs
   my $NASRP;
   my $crr = 0;# currently running rsyncs counter
-  my @crrPIDs = ();
   my $apr = 0;  # all parsyncfp rsync PIDs
   # how many rsyncs are running?  Check the PIDFILE against the rsync PIDs that are running
   # if there are other rsyncs running, their PIDs won't be in the PIDFILE.
   # so have to do a diff of the PIDFILE vs all PIDs of rsyncs running.
-  my $ALL_SYS_RSYNC_PIDS = `ps aux | grep rsyn[c] |  awk '{print $2}' | sort -g | tr '\n' ' '`;  chop $ALL_SYS_RSYNC_PIDS;
+  my $ALL_SYS_RSYNC_PIDS = `ps aux | grep rsyn[c] |  awk '{print \$2}' | sort -g | tr '\n' ' '`;  chop $ALL_SYS_RSYNC_PIDS;
+  if ($DEBUG) { debug(__LINE__, "PIDs of all rsync procs on the system: [$ALL_SYS_RSYNC_PIDS]"); }
   $NASRP = @ASRP = split(/\s+/, $ALL_SYS_RSYNC_PIDS);
   open (PIDFILE, "<$pidfile") or FATAL("Can't open PIDFILE [$pidfile]'");
   # PIDs from the PIDFILE to compare system rsyncs (could be multiple going)
@@ -702,11 +827,19 @@ sub get_rPIDs($$) {
   return ($rpids, $crr);
 }
 
-sub getavgnetbw ($$$) { 
+
+sub trim {   # ($)
+    my $string = shift;
+    $string =~ s/^\s+//;
+    $string =~ s/\s+$//;
+    return $string;
+}
+
+sub getavgnetbw  { # (###)
 # call as  (my $avgTCPrecv, $avgTCPsend, $avgRDMArecv, $avgRDMAsend) = getavgnetbw($NETIF, $CHECKPERIOD, $PERFQUERY); 
     my ($avgrec,$avgtrans,$R1,$T1,$R2,$T2,$RDMA_T1,$RDMA_T2,$RDMA_R1,$RDMA_R2, $avgRDMAsend,$avgRDMArecv,$PQ);
     $avgRDMAsend = $avgRDMArecv = 0;
-    my $NETIF = shift; my $CHECKPERIOD = shift; my $PQ = shift;
+    my $NETIF = shift; my $CHECKPERIOD = shift; $PQ = shift;
     $R1=`cat /sys/class/net/${NETIF}/statistics/rx_bytes`; 
     $T1=`cat /sys/class/net/${NETIF}/statistics/tx_bytes`;
     if ($PQ) {
@@ -737,8 +870,9 @@ sub pause {
     my $tmp = <STDIN>;
 }
 
-# color info string ($) blue
-sub INFO($) {
+# colors supported: https://perldoc.perl.org/Term/ANSIColor.html#Supported-Colors
+
+sub INFO {
     my $msg = shift;
     print color('bold blue');
     print " INFO: $msg";
@@ -746,7 +880,7 @@ sub INFO($) {
 }
 
 # # color warning string ($) orange
-sub WARN($) {
+sub WARN {
     my $msg = shift;
     print color('bold magenta');
     print " WARN: $msg \n";
@@ -754,14 +888,14 @@ sub WARN($) {
 }
 
 # color error string ($) red
-sub ERROR($) {
+sub ERROR {
     my $msg = shift;
     print color('bold red');
     print " ERROR: $msg \n";
     print color('reset');
 }
 
-sub FATAL($) {
+sub FATAL {
     my $msg = shift;
     print color('bold red');
     print "\n ** FATAL ERROR **: $msg \n\n";
@@ -771,10 +905,13 @@ sub FATAL($) {
 
 
 # call as [debug(__LINE__, "string")] to print line # and debug string
-sub debug($$) {
+sub debug {   #$$
+    print STDERR color('yellow');
 	my $line = shift;
 	my $msg = shift;
 	print STDERR "DEBUG[$line]: $msg\n";
+	# print STDERR color('reset');
+	print color('reset');
 	pause;
 }
 
@@ -854,15 +991,16 @@ sub usage {
   my $helptxt = <<HELP;
 
 $PARSYNCVER
-The only native rsync option that parsyncfp uses is '-a (archive).  If you
-need more, then it's up to you to provide them ALL via '--rsyncopts'.
-parsyncfp checks to see if the current system load is too heavy and tries
-to throttle the rsyncs during the run by monitoring and suspending
-/ continuing them as needed.
+The only native rsync options that parsyncfp (pfp) uses are '-a -s (archive, 
+protect-args).  If you need more, then it's up to you to provide them ALL 
+via '--rsyncopts'. pfp checks to see if the current system load is too 
+heavy and tries to throttle the rsyncs during the run by monitoring and 
+suspending / continuing them as needed. 
 
-parsyncfp uses fpart <http://goo.gl/K1WwtD> to create chunkfiles for rsync
+pfp uses fpart <http://goo.gl/K1WwtD> to create chunkfiles for rsync
 to read, bypassing the need to wait for a complete recursive scan. ie, it 
 starts the transfer immediately. For large deep trees, this can be useful.
+Also see the 'filelist' options.
 
 It appropriates rsync's bandwidth throttle mechanism, using '--maxbw'
 as a passthru to rsync's 'bwlimit' option, but divides it by NP so
@@ -899,8 +1037,8 @@ filenames with spaces fine.  Filenames with embedded newlines, DOS EOLs,
 and some other odd chars will be recorded in the log files in the 
 [.parsyncfp] dir.
 
-OPTIONS
-=======
+== OPTIONS
+
 [i] = integer number                      [s] = "quoted string"
 [f] = floating point number               ( ) = the default if any
 
@@ -915,7 +1053,15 @@ OPTIONS
                                             an rsync proc will sleep for 10s
 --chunksize|cs [s] (10G) .... aggregate size of files allocated to one rsync
                       process.  Can specify in 'human' terms [100M, 50K, 1T]
-                                                   as well as integer bytes.
+                        as well as integer bytes. pfp will warn once when/if
+                     you exceed the WARN # of chunkfiles [$WARN_FPART_FILES] and abort if
+                     you exceed the FATAL # of chunkfiles [$MAX_FPART_FILES]. You CAN force 
+                        it to use very high numbers of chunkfiles by setting 
+                       the number negative (--chunkfile -50GB), but this is 
+                     .. unwise.
+--fromlist|fl [s]  \\
+--trimpath|tp [s]   +-- see "Options for using filelists" below
+--trustme|tm       /
 --rsyncopts|ro [s]  ...  options passed to rsync as quoted string (CAREFUL!)
          this opt triggers a pause before executing to verify the command(+)
 --interface|i [s]  ......  network interface to monitor (not use; see above)
@@ -931,23 +1077,69 @@ OPTIONS
 --version  .................................  dumps version string and exits
 --help  .........................................................  this help
 
+== Options for using filelists
+
+(thanks to Bill Abbott for the inspiration/guidance).
+The following 3 options provide a means of explicitly naming the files
+you  wish to transfer by means of filelists, whether by 'find' or other
+means. Typically, you will provide a list of files, for example generated
+by a DB lookup (GPFS or Robinhood) with full path names.  If you use
+this list directly with rsync, it will remove the leading '/' but then
+place the file with that otherwise full path inside the target dir. So
+'/home/hjm/DL/hello.c' would be placed in '/target/home/hjm/DL/hello.c'.  
+If this result is OK, then simply use the '--fromlist' option to specify 
+the file of files.
+
+If the list of files are NOT fully qualified then you should make sure
+that the command is run from the correct dir so that the rsyncs can find
+the designated dirs & files.
+
+If you want the file 'hello.c' to end up as '/target/DL/hello.c' (ie
+remove the original '/home/hjm'), you would use the --trimpath option
+as follows: '--trimpath=/home/hjm'.  This will remove the given path
+before transferring it and assure that the file ends up in the right
+place.  This should work even if the command is executed away from the
+directory where the files are rooted. If you have already modified the
+file list to remove the leading dir path, then of course you don't need
+to use '--trimpath' option.
+
+--fromlist|fl [s] ... take explicit input file list from given file, 
+						1 path name per line.
+--trimpath|tp [s] ... path to trim from front of full path name if 
+                        '--fromlist' file contains full path names and 
+                        you want to trim them.
+--trustme|tm ........ with '--fromlist' above allows the use of file lists
+                        of the form:
+                        size in bytes<tab>/fully/qualified/filename/path  
+                        825692            /home/hjm/nacs/hpc/movedata.txt
+                        87456826          /home/hjm/Downloads/xme.tar.gz
+                        etc
+                        
+                        This allows lists to be produced elsewhere to be
+                        fed directly to pfp without a file stat() or
+                        complete recursion of the dir tree.  So if
+                        you're using an SQL DB to track your filesystem
+                        usage like Robinhood or a filesystem like GPFS
+                        that can emit such data, it can save some
+                        startup time on gigantic file trees.
+
 (*) you can use globs/regexes with --startdir, but only if you're at that
 point in the dir tree. ie: if you're not in the dir where the globs can be
 expanded, then the glob will fail.  However, explicit dirs can be set from
 anywhere if given an existing startdir.
 
-(+) the '--rsyncopts' string can pass any rsync option to all the rsyncs that
-will be started.  This allows options like '-z' (compression) or '--exclude-from' 
-to filter out unwanted files. Use any 'delete' options carefully tho.
+(+) the '--rsyncopts' string can pass any rsync option to all the rsyncs
+that will be started.  This allows options like '-z' (compression) or
+'--exclude-from'  to filter out unwanted files. I recommend that you DO
+NOT use any 'delete' options with this utility.  See below.
 
-Hints & Workarounds
-===================
+== Hints & Workarounds
+
 IMPORTANT: rsync '--delete' options will not work with '--rsyncopts' bc the 
 multiple parallel rsyncs that parsyncfp launches are independent and therefore 
 don't know about each other (and so cannot exchange info about what should
 be deleted or not.  Use a final 'rsync --delete' to clean up the transfer
 if that's your need.
-
 
 If you see an error related to "sh: /usr/bin/ls: Argument list too long", 
 it usually means that fpart has generated a huge list of chunkfiles (10s 
@@ -957,13 +1149,13 @@ with a chunksize that's too small (resulting in the above-noted too many
 chunkfiles). You can either increase the chunksize ('--chunksize=100G) 
 which will result in a smaller number of chunk files to process, or split 
 up the source dirs among multiple parsyncfps (which can be done using the 
-'--altcache' option above).
+'--altcache' option above).  Note the text above for '--chunksize'.
 
 
+== Examples
 
-Examples
-========
-                            == Good example 1 ==
+=== Good example 1
+
 % parsyncfp  --maxload=5.5 --NP=4 \
 --chunksize=\$((1024 * 1024 * 4)) \
 --startdir='/home/hjm' dir[123]  \
@@ -982,9 +1174,12 @@ where
   It uses 4 instances to rsync dir1 dir2 dir3 to hjm\@remotehost:~/backups
 
 
-                            == Good example 2 ==
-parsyncfp   --checkperiod 6  --NP 3 --interface eth0  --chunksize=87682352 \
-   --rsyncopts="--exclude='[abc]*'"  nacs/fabio   hjm\@moo:~/backups
+=== Good example 2
+
+% parsyncfp   --checkperiod 6  --NP 3 \
+--interface eth0  --chunksize=87682352 \
+--rsyncopts="--exclude='[abc]*'"  nacs/fabio   
+hjm\@moo:~/backups
 
 The above command shows several options used correctly:
 
@@ -998,8 +1193,8 @@ nacs/fabio - shows that you can specify subdirs as well as top-level dirs (as
 long as the shell is positioned in the dir above, or has been specified via
 '--startdir'
 
+=== Good example 3
 
-                            == Good example 3 ==
 parsyncfp -v 1 --nowait --ac pfpcache1 --NP 4 --cp=5 --cs=50M --ro '-az'  \
 linux-4.8.4 moo:~/test
 
@@ -1009,8 +1204,17 @@ The above command shows:
 - again shows use of --rsyncopts (--ro '-az') indicating 'archive' & compression'.
 - includes '--nowait' to allow unattended scripting of parsyncfp
 
+                            == Good example 4 ==
+parsyncfp-list --NP=8 --chunksize=500M --fromlist=/home/hjm/dl550 \
+hjm\@moo:/home/hjm/testparsync
+                            
+The above command shows:
+- if you use the '--fromlist' option, you cannot use explicit source dirs
+  (all the files come from the file of files (which require full path names)
+- that the '--chunksize' format can use human abbreviations (m or M for Mega).
 
-                            == Error example 1 ==
+=== ERROR example 1
+
 % pwd
 /home/hjm  # executing parsyncfp from here
 

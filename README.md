@@ -3,15 +3,7 @@ a parallel rsync wrapper in Perl. Released under GPL v3.
 
 (Version changes moved to the bottom of this file)
 
-## IMPORTANT NOTE (May 31, 2019)
-Thanks to the long-suffering efforts of Jeff Dullnig, I've discovered that when parsyncfp goes thru 
-multiple suspend/unsuspend cycles, it fails to correctly rsync all the src files to the target.
-
-If the '--maxload' option is kept high enough to avoid any suspensions, it syncs correctly. 
-
-If you're using parsyncfp now, please be aware that if forked rsyncs cycle thru suspend / unsuspends
-you will probably not end up with a correct target.  I'll be working on this to determine if it can 
-be fixed or if that 'feature' has to be removed.
+## See Changes at bottom.  The suspend/unsuspend bugs (there were actually 2) have been squashed (I think).
 
 
 ## Background
@@ -24,32 +16,35 @@ chunk by chunk basis.  This allows pfp to begin transferring files before the
 complete recursive descent of the source dir is complete.  This feature can save many 
 hours of prep time on very large dir trees.
 
-parsyncfp requires 'perfquery' and 'ibstat', Infiniband utilities both written 
-by Hal Rosenstock < hal.rosenstock [at] gmail.com > if your use involves transit 
-over IB networks.
+if your use involves transit over IB networks.parsyncfp requires 'perfquery' and 'ibstat', 
+Infiniband utilities both written by Hal Rosenstock < hal.rosenstock [at] gmail.com > 
 
 pfp is primarily tested on Linux, but is being ported to MacOSX
-as well. 
+as well, tho admittedly slowly.
 
 pfp needs to be installed only on the SOURCE end of the 
 transfer and only works in local SOURCE -> remote TARGET mode 
 (it won't allow remote local SOURCE <- remote TARGET, emitting an 
 error and exiting if attempted). It requires that ssh shared keys be
-set up prior to operation [see here](https://goo.gl/ghCazV).
+set up prior to operation [see here](https://goo.gl/ghCazV).  If it detects 
+that ssh keys are NOT set up correctly, it will ask for permission to try
+to remedy that situation.  Check your local and remote ssh keys to make
+sure that it has done so correctly.  Typically, they're in your ~/.ssh dir.
 
 It uses whatever rsync is available on the TARGET.  It uses a number 
 of Linux-specific utilities so if you're transferring between Linux 
 and a FreeBSD host, install parsyncfp on the Linux side. 
 
 The only native rsync options that pfp uses is '-a' (archive) &
-'-s' (respect bizarro characters in filenames).  If you need to define 
+'-s' (respect odd characters in filenames).  If you need to define 
 the rsync options differently, then it's up to you to define ALL of 
 them via '--rsyncopts' (the default '-a -s' flags will NOT be provided 
 automatically.
 
 pfp checks to see if the current system load is too heavy and tries
 to throttle the rsyncs during the run by monitoring and suspending / 
-continuing them as needed.
+continuing them as needed. There is a 'suspend.log' file in the 
+~/.parsyncfp dir that tracks these transitions.
 
 It appropriates rsync's bandwidth throttle mechanism, using '--maxbw'
 as a passthru to rsync's 'bwlimit' option, but divides it by NP so
@@ -59,7 +54,7 @@ It can only suspend rsyncs until the load decreases below the cutoff.
 (If you suspend parsyncfp (^Z), all rsync children will suspend as well,
 regardless of current state.)
 
-Unless changed by '--interface', it tried to figure out how to set the 
+Unless changed by '--interface', it tries to figure out how to set the 
 interface to monitor.  The transfer will use whatever interface routing 
 provides, normally set by the name of the target.  It can also be used for 
 non-host-based transfers (between mounted filesystems) but the network 
@@ -81,7 +76,8 @@ fpart log and all the PID files as well as the chunk files (f*).   parsyncfp no
 longer provides cache reuse because the fpart chunking is so fast.  The log files are
 datestamped and are NOT overwritten.  A new option allows you to specify alternative
 locations for the cache as well as specifying locations for multiple instances so that
-many parsyncfps can co-exist at the same time.
+many parsyncfps can run at the same time, altho they will detect each others' 
+fparts running and question this situation.
 
 ## Odd characters in names
 parsyncfp will sometimes refuse to transfer some oddly named files, altho 
@@ -90,11 +86,12 @@ which tries to respect names with spaces and properly escaped shell
 characters.  Filenames with embedded newlines, DOS EOLs, and other 
 odd chars will be recorded in the log files in the ~/.parsyncfp dir.
 
-** Debugging **
+##  Debugging
 To see where you (or I) have gone wrong, look at the 
 rsync-logfile\* logs in the .parsyncfp dir.  If you're a masochist, use
-the '--debug' flag which will spew lots of grotacious gratuitous info
-to the screen.
+the '--debug' flag which will spew lots of gratuitous info
+to the screen and pause multiple times to allow checking of intermediate 
+results.
 
 ## Options
 
@@ -112,7 +109,9 @@ be used to denote that option.<br>
 - --maxload|ml [f] (NP+2)  :  max system load - if sysload > maxload, an rsync proc will sleep for 10s
 - --chunksize|cs [s] (10G) : aggregate size of files allocated to one rsync  process.  Can specify in 'human' terms [100M, 50K, 1T] as well as integer bytes.
 - --rsyncopts|ro [s] : options passed to rsync as quoted string (CAREFUL!) this opt triggers a pause before executing to verify the command(+)
-- --fromlist|fl [s] ........... take explicit input file list from given file, 1 *fully qualified* path name per line.
+- --fromlist|fl [s]  \
+- --trimpath|tp [s]   +-- see "Options for using filelists" below
+- --trustme|tm       /
 - --interface|i [s] : network interface to monitor (not use; see above)
 - --checkperiod|cp [i] (5) : sets the period in seconds between updates
 - --verbose|v [0-3] (2) : sets chattiness. 3=debug; 2=normal; 1=less; 0=none.    This only affects verbosity post-start; warning & error messages will still be printed.
@@ -122,38 +121,92 @@ be used to denote that option.<br>
 - --version : dumps version string and exits
 - --help : this help
 
+##  Options for using filelists
+
+(thanks to Bill Abbott for the inspiration/guidance).
+
+The following 3 options provide a means of explicitly naming the files
+you  wish to transfer by means of filelists, whether by 'find' or other
+means. Typically, you will provide a list of files, for example generated
+by a DB lookup (GPFS or Robinhood) with full path names.  If you use
+this list directly with rsync, it will remove the leading '/' but then
+place the file with that otherwise full path inside the target dir. So
+'/home/hjm/DL/hello.c' would be placed in '/target/home/hjm/DL/hello.c'.  
+If this result is OK, then simply use the '--fromlist' option to specify 
+the file of files.
+
+If the list of files are NOT fully qualified then you should make sure
+that the command is run from the correct dir so that the rsyncs can find
+the designated dirs & files.
+
+If you want the file 'hello.c' to end up as '/target/DL/hello.c' (ie
+remove the original '/home/hjm'), you would use the --trimpath option
+as follows: '--trimpath=/home/hjm'.  This will remove the given path
+before transferring it and assure that the file ends up in the right
+place.  This should work even if the command is executed away from the
+directory where the files are rooted. If you have already modified the
+file list to remove the leading dir path, then of course you don't need
+to use '--trimpath' option.
+
+- --fromlist|fl [s] : take explicit input file list from given file, 
+                        1 path name per line.
+- --trimpath|tp [s] : path to trim from front of full path name if 
+                        '--fromlist' file contains full path names and 
+                        you want to trim them.
+- --trustme|tm : with '--fromlist' above allows the use of file lists of the form:
+                        
+                        size in bytes<tab>/fully/qualified/filename/path  
+                        825692            /home/hjm/nacs/hpc/movedata.txt
+                        87456826          /home/hjm/Downloads/xme.tar.gz
+                        etc
+                        
+This allows lists to be produced elsewhere to be
+                        fed directly to pfp without a file stat() or
+                        complete recursion of the dir tree.  So if
+                        you're using an SQL DB to track your filesystem
+                        usage like Robinhood or a filesystem like GPFS
+                        that can emit such data, it can save some
+                        startup time on gigantic file trees.
+
 ## Examples
 
 ### Good Example 1
 ```
-% parsyncfp  --maxload=5.5 --NP=4 --startdir='/home/hjm' dir1 dir2 dir3 hjm@remotehost:~/backups
+% parsyncfp  --maxload=5.5 --NP=4 \
+--chunksize=\$((1024 * 1024 * 4)) \
+--startdir='/home/hjm' dir[123]  \
+hjm\@remotehost:~/backups
+
 ```
 
 where:
 
+- "--maxload=5.5" will start suspending rsync instances when the 5m system load gets to 5.5 and then unsuspending them when it goes below it.
+- "--NP=4" forks 4 instances of rsync
+- "chunksize=$((1024 * 1024 * 4))" defines the chunksize as the product of numbers (equalling 4MB)
 - "--startdir='/home/hjm'" sets the working dir of this operation to '/home/hjm' and dir1 dir2 dir3 are subdirs from '/home/hjm'
 - the target "hjm\@remotehost:~/backups" is the same target rsync would use
-- "--NP=4" forks 4 instances of rsync
-- "--maxload=5.5" will start suspending rsync instances when the 5m system load gets to 5.5 and then unsuspending them when it goes below it.
 
 It uses 4 instances to rsync dir1 dir2 dir3 to hjm@remotehost:~/backups
 
 
 ### Good Example 2
 
-```
-parsyncfp   --checkperiod 6  --NP 3 --interface eth0  --chunksize=87682352 
-   --rsyncopts="--exclude='[abc]*'"  nacs/fabio   hjm@moo:~/backups
+```% parsyncfp   --checkperiod 6  --NP 3 \
+--interface eth0  --chunksize=87682352 \
+--rsyncopts="--exclude='[abc]*'"  nacs/fabio   
+hjm\@moo:~/backups
 ```
 
 where
 
-- --chunksize=87682352 - shows that the chunksize option can be used with explicit
+- "--checkperiod 6" - defines a 6s cycle time between updates
+- "--NP 3" - requests 3 instances of rsync 
+- "--interface eth0" - requests that the eth0 interface be monitored explicitly
+- "--chunksize=87682352" - shows that the chunksize option can be used with explicit
 integers as well as the human specifiers (TGMK).
-
 - --rsyncopts="--exclude='[abc]*'" - shows the correct form for excluding files
 based on regexes (note the quoting)
-
 - nacs/fabio - shows that you can specify subdirs as well as top-level dirs (as
 long as the shell is positioned in the dir above, or has been specified via
 '--startdir'
@@ -161,8 +214,8 @@ long as the shell is positioned in the dir above, or has been specified via
 ### Good Example 3
 
 ```
-parsyncfp -v 1 --nowait --ac pfpcache1 --NP 4 --cp=5 --cs=50M --ro '-az'  
-linux-4.8.4 moo:~/test
+% parsyncfp -v 1 --nowait --ac pfpcache1 --NP 4 \
+--cp=5 --cs=50M --ro '-az' linux-4.8.4 moo:~/test
 ```
 
 where
@@ -175,14 +228,14 @@ where
 
 ###  Good example 4
 
-parsyncfp-list --NP=8 --chunksize=500k --fromlist=/home/hjm/dl550 \
+parsyncfp-list --NP=8 --chunksize=500M --fromlist=/home/hjm/dl550 \
 hjm@moo:/home/hjm/testparsync
                             
 where
 
 - if you use the '--fromlist' option, you cannot use explicit source dirs
   (all the files come from the file of files (which require full path names)
-- that the '--chunksize' format can use human abbreviations (k or K for kilo).
+- that the '--chunksize' format can use human abbreviations (M or m for Mega).
 
 
 ### Error Example 1
@@ -226,10 +279,27 @@ The correct version of the above command is:
 
 ## Changes
 
+### 1.60
+- figured out why the suspend/unsuspends noted below weren't tracking correctly.  Thanks to Ben Dullnig 
+for his perseverance and Mikael Barfred for his code suggestions. Lots of cosmetic and interface tweaks.  
+Added Bill Abbott's suggestion to allow explicit sizing to the --fromlist option. Added a warning if the
+number of chunkfiles exceed 2000 (hard-coded).  Also caught a rare condition where the run ends with suspended jobs. 
+Now it should continue until the suspended PIDs get unsuspended and complete.
+
 ### 1.58
 - added '--fromlist' to allow explicit lists of files to be pfp'ed.  Suggested by 
 Bill Abbott to support GPFS's mmapplypolicy to generate lists so that pfp can immediately 
 start moving data instead of iterating thru miles of already-synced files. Thanks, Bill.
+
+### IMPORTANT NOTE (May 31, 2019)
+Thanks to the long-suffering efforts of Jeff Dullnig, I've discovered that when parsyncfp goes thru 
+multiple suspend/unsuspend cycles, it fails to correctly rsync all the src files to the target.
+
+If the '--maxload' option is kept high enough to avoid any suspensions, it syncs correctly. 
+
+If you're using parsyncfp now, please be aware that if forked rsyncs cycle thru suspend / unsuspends
+you will probably not end up with a correct target.  I'll be working on this to determine if it can 
+be fixed or if that 'feature' has to be removed.
 
 ### 1.57 
 - added explicit GPL v3 licence 
