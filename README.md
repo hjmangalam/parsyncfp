@@ -281,6 +281,9 @@ The correct version of the above command is:
 
 ## Changes
 
+### 1.6.1
+- added total raw bytes transferred as well as autoscale to MB, GB, TB in signoff stanza.
+
 ### 1.60
 - figured out why the suspend/unsuspends noted below weren't tracking correctly.  Thanks to Ben Dullnig 
 for his perseverance and Mikael Barfred for his code suggestions. Lots of cosmetic and interface tweaks.  

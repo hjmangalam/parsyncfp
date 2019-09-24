@@ -14,7 +14,7 @@ use File::Path qw(remove_tree make_path);
 use Term::ANSIColor;  # for alarms
 
 # copy to all the local hosts for local testing
-# fn="/home/hjm/bin/parsyncfp"; scp $fn dabrick:~/bin; scp $fn moo:~/bin; moo 'scp ~/bin/parsyncfp hmangala@hpcs:/data/hpc/bin'
+# fn="/home/hjm/bin/parsyncfp"; scp $fn moo:~/bin; moo 'scp ~/bin/parsyncfp hmangala@hpc.oit.uci.edu:/data/users/hmangala/bin'
 
 # after significant changes and testing, update the tarball and cp to moo for distribution; update the github
 # fn="/home/hjm/bin/parsyncfp"; cd ; cp  $fn ~/parsyncfp/; tar -cvzf parsyncfp+utils.tar.gz parsyncfp; scp parsyncfp+utils.tar.gz moo:~/public_html/parsync ; 
@@ -24,6 +24,8 @@ use Term::ANSIColor;  # for alarms
 # check github for bug reports.
  
 # TODO
+# [x] done add bit of code to sum all the bytes transmitted from all the rsync logs 
+# and present them both as bytes and MB, GB, TB at exit. ie in bash:
 # [x] done: rare condition where there are suspended rsyncs at end.  Have to check whether there are suspended PIDs
 #       and UNsuspend them to finish correctly.
 # [x] done: !! debug to find out why suspended/restarted rsyncs don't complete correctly. !!
@@ -74,12 +76,12 @@ $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
 @SYSLOAD $TARGET $tmp $Totlsiz %UTILS $VERSION $OS $Linux $MacOSX $NETFILE $myIP
 $PERFQUERY $avgTCPrecv $avgTCPsend $avgRDMArecv $avgRDMAsend 
 $WARN_FPART_FILES $MAX_FPART_FILES $SKIP_FPART_CHECK $FROMLIST $TRIMPATH $tf
-$TRUSTME $N @A 
+$TRUSTME $N @A $bytefiles $rprtnbr $sfx $ALLBYTES $bytesxf
 );
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.60 (Dullnig)
-June 24, 2019
+parsyncfp version 1.61 (Dullnig)
+Sept 23, 2019
 by Harry Mangalam <hjmangalam\@gmail.com>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -266,7 +268,7 @@ if ($SYSLOAD[0] < $MAXLOAD){
   Continue? [Cntrl+C to interrupt; Enter to continue]");
   pause();
 }
-
+$bytefiles = $parsync_dir . '/' ."rsync-logfile-" . $DATE . "_"; # use this for a glob base
 $FP_ROOT_DIR = "${parsync_dir}/fpcache";
 if (-d $parsync_dir) {
   if ($VERBOSE >= 1) {WARN("About to remove all the old cached chunkfiles from [$FP_ROOT_DIR].
@@ -465,7 +467,7 @@ while ($RSYNCS_GOING < $NP && $KEEPGOING) { #
   if (-e $CUR_FP_FLE) { # if the current chunkfile exists
     fixfilenames($CUR_FP_FLE, $ROOTDIR);  # check & fix for spaces, bad chars.
     # entire rsync command and PID capture (used in total of 2 places)
-    $logfile = $parsync_dir . '/' ."rsync-logfile-" . $DATE . "_" . $CUR_FPI;
+    $logfile = $bytefiles . $CUR_FPI; 
     $RSYNC_CMD = "cd $TRIMPATH && rsync  --bwlimit=$MAXBW  $RSYNCOPTS -a -s --log-file=$logfile --files-from=$CUR_FP_FLE  $ROOTDIR  $TARGET  & echo \"\${!}\" >> $PIDFILE";
     # WARN("$RSYNC_CMD");
     # there will be as many logfiles as fp chunkfiles.
@@ -675,7 +677,21 @@ do this, you will probably run into the string limit for 'ls'.
   expected files are where they're supposed to be. \n");}
             
             # remind user how much storage the cache takes and to clear the cache files 
-            my $du_cache = `du -sh $parsync_dir`; chomp $du_cache;
+            # calculate bytes transferred from rsync logs ('$bytefiles')
+            $bytefiles .= "\*"; # to make it a glob
+            $bytesxf = `grep 'bytes  total size' $bytefiles | scut -f=11 | stats | grep Sum | scut -f=1`;
+            chomp $bytesxf;
+            #my $bytesxf=`grep 'bytes  total size' $bytefiles | scut -f=4 | stats | grep Sum | scut -f=1`;
+            if ($bytesxf < 1073741824) { # if < GB, present as MB
+                $rprtnbr = $bytesxf / 1048576; $sfx = "MB";    # for MB
+            } elsif ($bytesxf < 1.09951162778e+12) { # if < TB, present as GB
+                $rprtnbr = $bytesxf / 1073741824; $sfx = "GB"; # for GB
+            } else { # present in TB
+                $rprtnbr = $bytesxf / 1.09951162778e+12; $sfx = "TB";# for TB; 
+            }
+            $ALLBYTES = sprintf("%9.5f %2s", $rprtnbr, $sfx);
+
+my $du_cache = `du -sh $parsync_dir`; chomp $du_cache;
             if ($VERBOSE >= 2) {INFO("
     The parsyncfp cache dir takes up [$du_cache]
     Don't forget to delete it, but wait until you are sure that your job
@@ -684,7 +700,8 @@ do this, you will probably run into the string limit for 'ls'.
 Reminder: check the parsyncfp log [$logfile]
     and the fpart log [$FPART_LOGFILE] 
     if there were errors. Use '--verbose=1' for less output.
-      
+    You transferred [$bytesxf bytes = $ALLBYTES] via all [$NP] rsyncs.
+    
       Thanks for using parsyncfp. Tell me how to make it better.
                        <hjmangalam\@gmail.com>\n");
             }
@@ -724,7 +741,9 @@ Reminder: check the parsyncfp log [$logfile]
 }  # while ($CUR_FPI < $NBR_FP_FLES )
 
 my $host = `hostname`;
-if (defined $EMAIL){system("echo 'all rsyncs done' | mail -s 'parsyncfp on host [$host] completed' $EMAIL");}
+if (defined $EMAIL){
+    system("cat $FPART_LOGFILE | mail -s \"$DATE: parsyncfp on host [$host] completed\" $EMAIL");
+}
 
 # and based on --disposal, (=c(ompress), =d(elete) =l(eave untouched)  all the chunk files.
 if ($DISPOSE =~ /d/) {
@@ -741,6 +760,7 @@ elsif ($DISPOSE =~ /c/ ) { # can it just be put into background?
   Please dispose of them as you see fit.
   
   Reminder: check [$FPART_LOGFILE] for errors if there were errors.
+  You transferred [$bytesxf bytes = $ALLBYTES] via all [$NP] rsyncs.
   
   Thanks for using parsyncfp. Tell me how to make it better.
   <hjmangalam\@gmail.com>\n");
