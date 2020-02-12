@@ -9,6 +9,7 @@
 use strict;
 use Getopt::Long;      # for std option handling: -h --yadda=badda, etc
 use Socket;
+# use IPC::Run3; # testing for passing STDIN to fpart - not working yet
 use Env qw(HOME PATH);
 use File::Path qw(remove_tree make_path);
 use Term::ANSIColor;  # for alarms
@@ -17,6 +18,7 @@ use Term::ANSIColor;  # for alarms
 # fn="/home/hjm/bin/parsyncfp"; scp $fn moo:~/bin; moo 'scp ~/bin/parsyncfp hmangala@hpc.oit.uci.edu:/data/users/hmangala/bin'
 
 # after significant changes and testing, update the tarball and cp to moo for distribution; update the github
+# moo is (temporarily? sadly!) dead.
 # fn="/home/hjm/bin/parsyncfp"; cd ; cp  $fn ~/parsyncfp/; tar -cvzf parsyncfp+utils.tar.gz parsyncfp; scp parsyncfp+utils.tar.gz moo:~/public_html/parsync ; 
 
 # Add changes to changelog in the README.md file
@@ -24,10 +26,23 @@ use Term::ANSIColor;  # for alarms
 # check github for bug reports.
  
 # TODO
+# [?] use STDIN to allow output of 'find', etc to provide the files to rsync with the --fromlist opt
+#     ie, use 'if (-t STDIN)' to detect STDIN.  This actually will require pfp to take the STDIN and 
+#     then write it to a file and then pass that file to fpart.  So this is something of a kludge.  It
+#     would be best to pass the STDIN handle directly to fpart, but this doesn't look possible (easily), 
+#     altho [IPC::Run3] or [IPC::Open3] might allow this.  https://metacpan.org/pod/IPC::Run
+# [?] insert an option to allow rsync's weird/idiosyncratic '/' suffix behavior for those 
+#     who really want it.  --risb = 'rsync idiosyncratic slash behavior'
+#     if there are '/' on the dir spec, allow them to pass thru without mods (usually
+#     pfp trims trailing '/'s
+# [?] check rsyncoptions ssh port change if poster replies.
+
+# [x] check whether there's any IB on the system and bypass any IB-related code/questions.
+# [x] done check to make sure if high NP and low # of chunks cause feedback lines to be skipped.
 # [x] done add bit of code to sum all the bytes transmitted from all the rsync logs 
 # and present them both as bytes and MB, GB, TB at exit. ie in bash:
-# [x] done: rare condition where there are suspended rsyncs at end.  Have to check whether there are suspended PIDs
-#       and UNsuspend them to finish correctly.
+# [x] done: rare condition where there are suspended rsyncs at end.  
+#     Have to check whether there are suspended PIDs and UNsuspend them to finish correctly.
 # [x] done: !! debug to find out why suspended/restarted rsyncs don't complete correctly. !!
 # [ ] - option for bytes IN or OUT.  Usually bytes go out and that's what's shown, but sometimes
 #         the transfer is coming from a network FS to a local disk and then you want bytes IN.
@@ -76,12 +91,12 @@ $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
 @SYSLOAD $TARGET $tmp $Totlsiz %UTILS $VERSION $OS $Linux $MacOSX $NETFILE $myIP
 $PERFQUERY $avgTCPrecv $avgTCPsend $avgRDMArecv $avgRDMAsend 
 $WARN_FPART_FILES $MAX_FPART_FILES $SKIP_FPART_CHECK $FROMLIST $TRIMPATH $tf
-$TRUSTME $N @A $bytefiles $rprtnbr $sfx $ALLBYTES $bytesxf
-);
+$TRUSTME $N @A $bytefiles $rprtnbr $sfx $ALLBYTES $bytesxf $IB_PRSNT $CFL $rHOSTNAME
+@NETDEVLIST $NETDEVADDRLIST);
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.61 (Dullnig)
-Sept 23, 2019
+parsyncfp version 1.63 (Groundhog Day)
+Feb 02, 2020
 by Harry Mangalam <hjmangalam\@gmail.com>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -136,9 +151,9 @@ if (!defined $VERBOSE) {$VERBOSE = 2;}
 $PERFQUERY = 0;
 $WARN_FPART_FILES = 2000; # issue warning at this point.
 $MAX_FPART_FILES  = 5000; # die at this point
+$IB_PRSNT = 0;
 
 if (! @ARGV) {usage();} # in case someone doesn't know what to do.
-
 
 # DEBUG: set up a special file to log suspend and unsupends PIDs to see where they get mixed up.
 # number the suspended PIDs to see when / if they get unsuspended.
@@ -197,35 +212,86 @@ if ($Linux) {
 # so as long as the 1m load / NCPUs < 1, we're fine; if > 1, we may want to start throttling..
 $LOAD1mratio = $SYSLOAD[0] / $NCPUs;
 
+# should also detect Windows and do a projectile vomit exit.
+my ($nbr_ifs, $rtd_ifs);
+
+$TARGET = $ARGV[$#ARGV]; # remote rsync target, needed for 
+
 if (! defined $NETIF) {
   if ($MacOSX) {
      $NETIF = `netstat -nr | grep "^default" | head -n1 | awk '{print \$6}'`; chomp $NETIF;
      $myIP = `ifconfig $NETIF | grep 'inet ' | awk '{print \$2}'`; chomp $myIP;
-  } else {
-    #TODO This has to be checked for multi-homed systems and if the system is multihomed, 
-    # force a choice as to which one to use via --interface
-    my $ifs = `/sbin/route -n | grep "^0.0.0.0" | awk '{print \$8}' | wc -l`; chomp $ifs;
-    $NETIF = `/sbin/route -n | grep "^0.0.0.0" | awk '{print \$8}'`; chomp $NETIF;
-    if ($ifs != '1'){
-      die "\nERROR: Your system is multi-homed - I've detected more than 1 active interface:
-$NETIF \nPlease specify the one you want to use via the '--interface' flag.\n";
-    } else {
-      $NETIF = `/sbin/route -n | grep "^0.0.0.0" | awk '{print \$8}'`; chomp $NETIF;
-      $myIP = `ifconfig $NETIF | grep 'inet ' | awk '{print \$2}' | cut -d: -f2`; chomp $myIP;
-    }
+  } else { # we assume Linux..
+      # this is where the determination about which interface has to be made based on the target.
+      # if it's out on the inet, then the default is fine; if it's internal or alternative (DMZ, 
+      # or other local net) then it has to be determined by using the target's route.
+      # $TARGET will look like user@hostname:/path or hostname:/path if user is the same. But it will have a ':/', so key on that.
+      if ($TARGET =~ ':/') { # then it's a remote host as oppo to a locally mounted fs.
+        my $rUaHOSTNAME; my $np = my @rPATH = split(/:/, $TARGET);
+        $rUaHOSTNAME = $rPATH[0];
+        if ($rUaHOSTNAME =~ /@/) { 
+            my $rUaHcnt = my @UseratHost = split(/@/,$rUaHOSTNAME); 
+            $rHOSTNAME = $UseratHost[1];
+        } 
+        else {$rHOSTNAME = $rPATH[0];}
+        $NETIF = `ip -o route get \$(getent hosts $rHOSTNAME | awk '{print \$1}' | head -1) | scut -f=4`; 
+        chomp $NETIF;
+        # so this next line should generate the routable IP# to the target, regardless of which network
+        # it's on.  Thanks Ryan Novosielski for the suggestion.
+        $myIP = `ip a show dev $NETIF | grep 'inet ' | scut -f=2 | sed 's/...\$//'`; chomp $myIP;
+      } else {  # the TARGET is locally mounted, either by net or direct, so we can easily tell 
+            # what interface it should use to push bytes to it. So check for multi-homed systems and 
+            # if the system is multihomed, force a choice as to which one to use via --interface
+            $rtd_ifs = `ip link show | grep ' UP ' | scut -f=1 | tr -d ':'  | tr '\n' ' '`; chop $rtd_ifs;
+            $nbr_ifs = `ip link show | grep ' UP ' | wc -l`;
+            if ($nbr_ifs != '1'){
+                my $rawip = `ip a | grep global`;
+                #print "DDD: rawip = [$rawip]";
+                $NETDEVADDRLIST = "";
+                my $r=0;
+                for (split /^/, $rawip) {
+                    my $n = my @l = split(/\s+|\//);
+                    my $devip = $l[2]; my $netdev = $l[-1]; chomp $netdev;
+                    $NETDEVLIST[$r++] = $netdev;
+                    $NETDEVADDRLIST .= "$netdev ($devip)\n";
+                }
+                my $limit = scalar @NETDEVLIST;
+                #for (my $r=0; $r < $limit; $r++){print "[$r] [$NETDEVLIST[$r]]\n";}
+                if (! $NOWAIT) {
+                    WARN("Your system is multi-homed - I've detected more than 1 active interface:
+[$rtd_ifs].  Please specify the one you want to monitor.
+And specify it via the '--interface' option next time.");
+                    my $r = 1000; $limit = scalar @NETDEVLIST;
+                    while ($r >= $limit) {
+                        print "Interface to monitor? (one of the 1st column) \n$NETDEVADDRLIST\n(no default) : ";
+                        $NETIF = <STDIN>; chomp $NETIF; $r = 0;
+                        while ($NETIF ne $NETDEVLIST[$r] && $r <= $limit) {
+                            # print "[$r] [$NETIF] = [$NETDEVLIST[$r]] ?\n";
+                            $r++; 
+                            if ($r > $limit) { print "\nNot in the valid list [$rtd_ifs]; try again.\n"; $r = 1000;
+                            }
+                        }
+                    }
+                }
+            }
+            INFO("OK - You've selected [$NETIF] as the interface to monitor.")
+      } 
   }
 }
-my $pqpath = `which perfquery`;
+
+my $pqpath = "";`which perfquery`;
 if ($NETIF =~ /ib/){
-  INFO("You've specified what looks like an Infiniband interface [$NETIF]...\n");
+  $IB_PRSNT = 1;
+  $pqpath = `which perfquery`;
+  INFO("You've specified what looks like an Infiniband interface [$NETIF]...");
   if ($pqpath ne "") {
     $PERFQUERY = 1;
-    INFO(".. and you have 'perfquery installed, so RDMA bytes will be reported as well.\n");
+    INFO(".. and you have 'perfquery installed, so RDMA bytes will be reported as well.");
   } else {
     $PERFQUERY = 0;
-    INFO(".. but you don't have 'perfquery' installed, so only TCP bytes will be reported.\n");
+    INFO(".. but you don't have 'perfquery' installed, so only TCP bytes will be reported.");
   }
-}
+} else {$IB_PRSNT = 0;}
 
 if (defined $DEBUG) {$VERBOSE = 3;} # DEBUG = VERBOSE=3
 if (defined $VERBOSE && ($VERBOSE < 0 || $VERBOSE > 3)) {die "ERROR: --verbose arg must be 0-3. Try again.\n";}
@@ -246,10 +312,10 @@ $IF_SPEED = 0;
 # ?? Is this nec anymore?  If so, need to bring it up to date with the new naming conventions
 # see: https://goo.gl/kDLr8b
 # get some network info
-if ($NETIF =~ /eth/) {
-  $IF_SPEED = `ethtool eth0 2> /dev/null | grep Speed | cut -f2 -d:`;}
-elsif ($NETIF =~ /wlan/) {
-  $IF_SPEED = `iwconfig wlan0 | grep -i quality`;
+if ($NETIF =~ /eth|en/) {
+  $IF_SPEED = `ethtool $NETIF 2> /dev/null | grep Speed | cut -f2 -d:`;}
+elsif ($NETIF =~ /wl/) {
+  $IF_SPEED = `iwconfig $NETIF | grep -i quality`;
 } elsif ($NETIF =~ /ib/) {
   $IF_SPEED = `ibstat | grep Rate | head -1 | sed -e 's/^[ \t]*//'`;
   $IF_SPEED = "IB:" . $IF_SPEED;
@@ -291,8 +357,8 @@ $FP_ROOT = $FP_ROOT_DIR . "/f";  # the root name of the fpart chunk files f.1, e
 $PIDFILE = $FP_ROOT_DIR . '/' . "rsync-PIDs" . '-' . $DATE;
 $FPART_LOGFILE = $FP_ROOT_DIR . '/' . "fpart.log." . $DATE;
 $FP_PIDFILE = $FP_ROOT_DIR . '/' . "FP_PIDFILE" . $DATE;
-$hdr_rpt = 20; # nbr of lines to repeat the header
-$hdr_cnt = 21;  # header counter; > $hdr_rpt so it gets printed 1st time
+$hdr_rpt = 20;  # nbr of lines to repeat the header
+$hdr_cnt = $hdr_rpt + 1;  # header counter; > $hdr_rpt so it gets printed 1st time
 
 # this takes care of the last ARGV so that all the rest of the words are target dirs&files
 $TARGET = $ARGV[$#ARGV]; # remote rsync target
@@ -302,12 +368,13 @@ $#ARGV--;
 if ($TARGET =~ /~/) { FATAL("You defined the target dir with a '~': [$TARGET].
     While this SHOULD work, it often doesn't so I'm going to force you to replace 
     it with an explicit remote path.  
-    ie instead of using '~/dir', please use '/home/<user>/dir.  Sorry."); }
+    ie instead of using '~/dir', please use '/home/<user>/dir or whatever remote 
+    dir spec is needed.  Sorry.
+"); }
 
 # now process the dirs
 $dcnt = 0;
 $fnd2r = "";  # zero the list of 'files 'n' dirs to rsync'
-#$dirtmp = shift; # should only be dir/files left once getopt finishes (see above)
 
 # only do this next stanza if NOT taking files from the '$FROMLIST
 if (!defined $FROMLIST) {
@@ -329,7 +396,7 @@ if (!defined $FROMLIST) {
         }
         $dirtmp = shift;
     }
-} else { # if $FROMLIST s defined, is $TRIMPATH defined? if so, is it valid?  End with a '/'?
+} else { # if $FROMLIST is defined, is $TRIMPATH defined? if so, is it valid?  End with a '/'?
     $tf="/tmp/pfp.tmp";
     if (defined $TRIMPATH) {
         $ROOTDIR = "$TRIMPATH";
@@ -337,20 +404,38 @@ if (!defined $FROMLIST) {
             INFO("The TRIMPATH you specified exists, is a dir, and is readable.\n");
             $TRIMPATH = trim($TRIMPATH);
             # print "TRIMPATH = [$TRIMPATH]\n";
-            if ($TRIMPATH =~ m%^/*/$%) { # $TRIMPATH has to begin with a '/' but NOT end with one.
-                $TRIMPATH = chop $TRIMPATH;
-                INFO("Chopped a '/' from the TRIMPATH");
-            }
+
+####################################################################################
+### here's where to handle the --risb option to allow the native '/' behavior.            
+####################################################################################
+#             if ($TRIMPATH =~ m%^/*/$%) { # $TRIMPATH has to begin with a '/' but NOT end with one.
+#                 $TRIMPATH = chop $TRIMPATH;
+#                 INFO("Chopped a '/' from the TRIMPATH");
+#             }
+            
+
             # now process the input file to trim the TRIMPATH
             if (-e $tf) {unlink $tf or FATAL("Temp file [$tf] exists and can't be deleted.\n");}
-            open (CFL, "<$FROMLIST") or FATAL("Can't open FROMLIST [$FROMLIST]'");
-            open (NFL, ">$tf") or FATAL("Can't open TEMPFILE [$tf]'");
+####################################################################################
+## here is where we test for STDIN and if it exists, process it rather than the file
+## via reassigning the lexical FH.
+####################################################################################
+        # if STDIN, assume for now that it's the same kind of file of files that would be read in
+        # via CFL and process in the same way
+            if (-t STDIN && $FROMLIST eq '-') { # there's a stream of filenames coming in via STDIN
+                # now have to process the STDIN in the same way as the file.
+                INFO("Reading file list from STDIN.");
+                $CFL = *STDIN; # assign the $CFL filehandle to STDIN
+            } else {
+                # use the variable $CFL (lexical FH instead of direct FH)
+                open ($CFL, "<$FROMLIST") or FATAL("Can't open FROMLIST [$FROMLIST]'");
+            }
+            open (NFL, ">$tf") or FATAL("Can't open TEMPFILE [$tf]'"); # NFL can can be 'normal' FH
             my $lc=0;
-            while (<CFL>) {
+            while (<$CFL>) {
                 #print "\nCFL input: [$_]\n";
                 $lc++;
                 if ($_ =~ /$TRIMPATH/) { # this will now hit the top-level dir line alone since it will now be '/home/hjm'
-                    # print "yup ";
                     $_ =~ s%$TRIMPATH%%;  # kill the '/home/hjm'
                     #print "\npost subst: [$_]"; #sleep 1;
                     my $TT;
@@ -367,26 +452,27 @@ if (!defined $FROMLIST) {
                     chomp;
                     print STDERR "Warning: [$_] in FROMLIST [$FROMLIST] line [$lc] doesn't have a [$TRIMPATH]\n";
                 }
-            }
-            # print "NFL done printing\n";
-        }
-    }
+                close $CFL; close NFL;  # just close them, don't delete, cp, or mv them.
+            } # while (<CFL>)
+        } # if (-e $TRIMPATH && -d $TRIMPATH && -r $TRIMPATH)
+    } # if (defined $TRIMPATH) 
+    
     #don't want to change the FROMLIST since it may have taken a long time to generate, so use the $tf as input to fpart
-    close CFL; close NFL;  # just close them, don't delete, cp, or mv them.
+
     #unlink "$FROMLIST" or die "FATAL: Couldn't rm [$FROMLIST]";
     #move("$tf","$FROMLIST");  
     
 } 
 
-#######
-#exit;
-#######
+
+
+
 
 
 $#ARGV++; # now incr to allow the TARGET to be captured.
 my @cachefiles = (); # will populate with list of cachefiles to process together.
 
-my $fparts_already_running = `ps aux | grep 'fpar[t]'`; chomp $fparts_already_running;
+my $fparts_already_running = `ps ux | grep 'fpar[t]'`; chomp $fparts_already_running;
 if ($fparts_already_running ne ''){
     WARN("One or more 'fpart's are already running:
     ======
@@ -410,27 +496,46 @@ $fnd2r =~ s/^\s+|\s+$//g ; # trim leading and trailing
 # address this problem.
 #$fnd2r =~ s/ /\\ /g; # subs internal spaces with escaped spaces
 my $fpartcmd = "";
+my $stdin;
 if (defined $FROMLIST) {
     # check to see if it exists & is a file & is readable
     if (-e $FROMLIST && -f $FROMLIST && -r $FROMLIST) {
         if ($VERBOSE >= 2) { INFO("Alternative file list is readable; converting list to chunks.\n"); }
         # 
-    } else { FATAL("The 'fromlist file [$FROMLIST] doesn't exist,\nisn't a file, or isn't readable."); }
+    } elsif ( $FROMLIST eq '-') { $tf = '-';}
+    else { FATAL("The 'fromlist input [$FROMLIST] doesn't exist,\nisn't a file (or STDIN), or isn't readable."); }
     #convert to chunks with fpart
     # following fpart uses the realtime option (-L) so that the code support should be same as for the original
     # and capture the child PID!
     my $AFLAG = "";
     if ($TRUSTME) {$AFLAG = "-a "; } # if user specs the format that includes sizes
-    $fpartcmd="cd $TRIMPATH; fpart -v -L -s $FPARTSIZE_N $AFLAG -i $tf -o $FP_ROOT 2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
+    if ($tf eq '-') {
+        $fpartcmd="fpart -v -L -s $FPARTSIZE_N $AFLAG -i '-' -o $FP_ROOT < $tf 2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
+    } else {
+        $fpartcmd="cd $TRIMPATH; fpart -v -L -s $FPARTSIZE_N $AFLAG -i $tf -o $FP_ROOT 2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
+    }
 } else { # use the full recursive fpart
     # capture the child PID!
     $fpartcmd = "fpart -v -L -z -s $FPARTSIZE_N -o $FP_ROOT $fnd2r  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE"; 
 }
+
+# fpart -v -L  -i - < fileoffiles # this works.
+# so if use the IPC::Run3
+# run3($cmd, $stdin, $stdout, $stderr, \%options)
+# instead of: fpart -v -L -s $FPARTSIZE_N $AFLAG -i $tf -o $FP_ROOT
+# use this:   fpart -v -L -s $FPARTSIZE_N $AFLAG -i -   -o $FP_ROOT < $tf
+# where $tf is the alias to STDIN.
+# see: https://metacpan.org/pod/IPC::Run3
+# so : 
+# set $tf to $stdin
+# $fpartcmd="fpart -v -L -s $FPARTSIZE_N $AFLAG -i $tf -o $FP_ROOT 2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
+
 if ($DEBUG) {debug(__LINE__, "fpart fork cmd:\n[$fpartcmd]");} 
 if ($FPART_PID = fork) { # this actually takes a couple of seconds 
-    if ($VERBOSE >= 2) { INFO("Forking fpart.  Check [$FPART_LOGFILE] for errors if it hangs.\n"); }
+    if ($VERBOSE >= 2) { INFO("Forking fpart with PID = [$FPART_PID].  Check [$FPART_LOGFILE] for errors if it hangs.\n"); }
 } else {
-    system "$fpartcmd";
+    if ($tf eq '-') {run3 ($fpartcmd); } # this should take parent's STDIN since it's not specified.
+    else {system "$fpartcmd";}
     $FPART_PID = `cat $FP_PIDFILE`; chomp $FPART_PID;
     exit(0); # it's forked, now exit this stanza
 }
@@ -462,6 +567,9 @@ $RSYNCS_GOING = $CUR_FPI = 0; # $CUR_FPI = current FP index
 
 if ($VERBOSE >= 2) {INFO("Starting the 1st [$NP] rsyncs ..\n");}
 my $sc = 0;
+
+# Here's where the faulty breakout is happening  - check with an actual run with a small dir to bridgit.
+# 
 while ($RSYNCS_GOING < $NP && $KEEPGOING) { #
   $CUR_FP_FLE = $FP_ROOT . "." . $CUR_FPI ; # the current fp chunkfile
   if (-e $CUR_FP_FLE) { # if the current chunkfile exists
@@ -478,7 +586,7 @@ while ($RSYNCS_GOING < $NP && $KEEPGOING) { #
     $CUR_FPI++;
     $RSYNCS_GOING++;
   } else { # there aren't any more fp chunk files waiting, so check to see if it's finished.
-    $FPART_RUNNING = `ps aux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
+    $FPART_RUNNING = `ps ux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
     if ($FPART_RUNNING eq '0') {
       # so if it's done, then we're done.  No more chunk files, so no more rsyncs to start.
       $KEEPGOING = 0; # signal the while loop to break.
@@ -490,18 +598,30 @@ while ($RSYNCS_GOING < $NP && $KEEPGOING) { #
 
 if ($DEBUG) {debug(__LINE__,"OUT OF RSYNC STARTUP LOOP");}
 
+# add a check here to make sure that there were at least as many fpart files as NP processes. 
+# if there are less than NP, then issue a WARN message
+
+if ($CUR_FPI < $NP) {
+    WARN("
+    The number of chunk files generated by fpart [$CUR_FPI] < the # of rsync 
+    processes you specified [$NP].  
+    Did you check the dir tree / file list to make sure you're setting the chunk 
+    size appropriately (--chunksize) ?  It's currently set to [$FPARTSIZE].
+    ");
+}
+
 # so at this point either we've loaded all the rsyncs up to NP or we've completely finished.
 # If the latter, say good bye.  If the former, then we have to keep launching
 # rsyncs up to NP until we've used up all the fpart chunkfiles.
 
-$sPIDs = ""; # running PIDs launched by parsync, suspended PIDs (strings)
+$sPIDs = ""; # running PIDs launched by parsyncfp, suspended PIDs (strings)
 $NBR_FP_FLES = `\\ls -U1 $FPCFS* | wc -l`; chomp $NBR_FP_FLES; # get current # of chunks
 my @aprPIDs; # all recorded parsyncfp rsync PIDs ever started
 my @crrPIDs; # currently RUNNING parsyncfp rsync PIDs.
 my @csrPIDs; #currently SUSPENDED parsyncfp rsync PIDs.
 
 ### FOLLOWING IS THE MAIN PARSYNC-FPART LOOP
-$FP_RUNNING = `ps aux | grep $FPART_PID | grep fpar[t] | wc -l`; chomp $FP_RUNNING;
+$FP_RUNNING = `ps ux | grep $FPART_PID | grep fpar[t] | wc -l`; chomp $FP_RUNNING;
 
 $ cyclecnt = 0;
 my $IFN = sprintf("%7s",$NETIF);
@@ -515,23 +635,21 @@ if ($VERBOSE == 0) { #  ..............|---------- / ---------|
 
 my $start_secs = `date  +"%s"`; 
 
-while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
+while ($CUR_FPI <= $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
   $rPIDs = "";
   # print the header
   if ($hdr_cnt > $hdr_rpt) {
     my $glob = "${FP_ROOT}.*"; $hdr_cnt = 0;
     $nbr_cur_fpc_fles = `\\ls -U1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
-
-     $day =`date +"%F"`; chomp $day; 
-     
-     if ($VERBOSE > 1) {print "        | Elapsed |   1m   |    [$IFN]   MB/s  | Running || Susp'd  |      Chunks       [$day]
+    $day =`date +"%F"`; chomp $day; 
+    if ($VERBOSE > 1) {print "        | Elapsed |   1m   |    [$IFN]   MB/s  | Running || Susp'd  |      Chunks       [$day]
   Time  | time(m) |  Load  |     TCP / RDMA  out  |   PIDs  ||  PIDs   | [UpTo] of [ToDo]\n";}
   }
+  # if ($DEBUG) {debug(__LINE__,"sPIDs string = [$sPIDs]");}  
   ($rPIDs, $crr) = get_rPIDs($PIDFILE, $sPIDs);
 
   # now get load, bw, etc, and start rsyncs on new chunkfiles or suspend them to
   # load-balance
-
   $loadavg = `cat /proc/loadavg | tr -d '\n'`; # What's the system load?
   @SYSLOAD = split (/\s+/, $loadavg); # 1st 3 fields are 1, 5, 15m loads
   $LOAD1mratio = $SYSLOAD[0] / $NCPUs;
@@ -544,12 +662,12 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
   $nbr_cur_fpc_fles = `\\ls -U1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
 
   # if fpart is done ($FPART_RUNNING = "")
-  # $FPART_RUNNING = `ps aux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
+  # $FPART_RUNNING = `ps ux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
   #AND $CUR_FPI >= $nbr_cur_fpc_fles
   # AND there aren't any $rPIDs AND there aren't any $sPIDs
   # then I think we're done.
   # check fpart to see if it's still running..
-  $FPART_RUNNING = `ps aux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
+  $FPART_RUNNING = `ps ux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
 
   if ($rPIDs eq "" ){$rPIDs = "-"}
   my $rDATE=`date +"%T" | sed 's/:/./g' `; chomp $rDATE;
@@ -579,8 +697,7 @@ while ($CUR_FPI < $NBR_FP_FLES || $FP_RUNNING || $STILLRSYNCS ) {
     # and then over-write it or add a newline for scrolling data.
     if ($VERBOSE == 1) { printf "\r";}
     elsif ($VERBOSE >= 2) {printf "\n";}
-
-    if ($DEBUG) {print STDERR "DEBUG: running PIDs = $rPIDs; suspended PIDs = $sPIDs.\n";}
+    #if ($DEBUG) {debug(__LINE__, "running PIDs = [$rPIDs]; suspended PIDs = [$sPIDs].");}
     $cyclecnt = 0; $hdr_cnt++;
   }
   my $warncount = 0;
@@ -606,12 +723,14 @@ do this, you will probably run into the string limit for 'ls'.
     # suspend a PID; then loop as normal. If still high, will continue to
     # suspend PIDs until there's none left.
     if ($DEBUG) {debug(__LINE__, "System load [$SYSLOAD[0]] is > MAXLOAD [$MAXLOAD].  Will try to suspend a running rsync to shed load.");}
+    #if ($DEBUG) {debug(__LINE__, "exceeding MAXLOAD, rPIDs = [$rPIDs]");}
     # reassign a new list from ONLY RUNNING PIDs to $rPIDs (refresh $rPIDs)
     # this cmd picks up both suspended and running PIDs- have to remove the suspended ones.
     # in an efficient way.
     if ($rPIDs =~ /\d+/) {$rPIDs = `ps -p $rPIDs | grep -v PID| cut -c 1-5 | tr '\n' ' '`;}
     $rPIDs =~ s/^\s+|\s+$//g ; # trim leading and trailing
     # turn it into an array - (-> sub?)
+    #if ($DEBUG) {debug(__LINE__, "in MAXLOAD routine rPIDs = [$rPIDs], sPIDs = [$sPIDs],");}
     my $rn = my @ra = split(/\s+/, $rPIDs);
     my $sn = my @sa = split(/\s+/, $sPIDs);
     for (my $r=0; $r< $rn; $r++) {
@@ -619,11 +738,12 @@ do this, you will probably run into the string limit for 'ls'.
       if ($ra[$r] eq $sa[$s]) {$rPIDs =~ s/$ra[$r]//g;} # delete it from $rPIDs
       }
     }
+    #if ($DEBUG) {debug(__LINE__, "string rPIDs = [$rPIDs]");}
     # picks up both suspended and running PIDs and the new result has to have something in it as well.
     if ($rPIDs =~ /\d+/){ # if any still left
       my $N = my @raPIDs = split(/\s+/, $rPIDs); my $e = 0; # @raPIDs = temp array to carry currently running PIDs
       while ($e <= $N && $raPIDs[$e] !~ /\d+/){$e++};
-      if ($DEBUG) {debug(__LINE__, "DEBUG:[suspend] got one: [$raPIDs[$e]]; will now suspend it.");}
+      if ($DEBUG) {debug(__LINE__, "[suspend] got one: [$raPIDs[$e]]; will now suspend it.");}
       kill 'STOP', $raPIDs[$e];
       
       $susp_cnt++;
@@ -645,7 +765,6 @@ do this, you will probably run into the string limit for 'ls'.
     
     $unsusp_cnt++;
     print SUSLOG "UNsuspend\t$unsusp_cnt\t($susp_cnt)\t$saPIDs[$e]\n";
-    
     $rPIDs = "$rPIDs" . ' ' . "$saPIDs[$e]"; # transfer sPID to rPID.
     $sPIDs =~ s/$saPIDs[$e]//g; # delete that PID fr the sPID string
   } # end of 'SUSPEND OR CONTINUE to LOADBALANCE.' test loop
@@ -654,22 +773,23 @@ do this, you will probably run into the string limit for 'ls'.
     $CUR_FP_FLE = "${FP_ROOT}.${CUR_FPI}" ; # generate the next fpart chunk file with $CUR_FPI
       # if fpart is still going, wait for the next chunkfile to show up
     my $cfw = 0;
-    $FPART_RUNNING = `ps aux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
+    $FPART_RUNNING = `ps ux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
     while (! -e $CUR_FP_FLE && $FPART_RUNNING eq '1'){
       if ($VERBOSE >= 2) {INFO("Waiting [$cfw]s for next chunkfile..\r"); sleep 2; $cfw += 2;}
     }
+    if ($DEBUG) {debug(__LINE__,"sPIDs string = [$sPIDs]");}  
     ($rPIDs, $crr) = get_rPIDs($PIDFILE, $sPIDs);
     my $n = my @a = split(/\s+/, $rPIDs);
     my $R2SU = $NP - $n; # this is the number of rsyncs to start up
     $glob = "${FP_ROOT}.*";
     my $nbr_cur_fpc_fles = `\\ls -U1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
     # $fparts_already_running will be '' if it's finished running.
-    my $fparts_already_running = `ps aux | grep 'fpar[t]'`; chomp $fparts_already_running;
+    my $fparts_already_running = `ps ux | grep 'fpar[t]'`; chomp $fparts_already_running;
     # Check this more carefully for exceptions - this is the drop-dead error point
     # in some situations
     for ($n=0; $n<$R2SU; $n++) {
       # make sure we haven't finished
-      $FPART_RUNNING = `ps aux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
+      $FPART_RUNNING = `ps ux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
 
         if ($rPIDs eq "" && $sPIDs eq "" && $CUR_FPI >= $nbr_cur_fpc_fles && $FPART_RUNNING == 0){
             # then we're done - exit.
@@ -679,7 +799,7 @@ do this, you will probably run into the string limit for 'ls'.
             # remind user how much storage the cache takes and to clear the cache files 
             # calculate bytes transferred from rsync logs ('$bytefiles')
             $bytefiles .= "\*"; # to make it a glob
-            $bytesxf = `grep 'bytes  total size' $bytefiles | scut -f=11 | stats | grep Sum | scut -f=1`;
+            $bytesxf = `grep 'bytes  total size' $bytefiles | scut -f=11 | stats --quiet  | grep Sum | scut -f=1`;
             chomp $bytesxf;
             #my $bytesxf=`grep 'bytes  total size' $bytefiles | scut -f=4 | stats | grep Sum | scut -f=1`;
             if ($bytesxf < 1073741824) { # if < GB, present as MB
@@ -697,10 +817,12 @@ my $du_cache = `du -sh $parsync_dir`; chomp $du_cache;
     Don't forget to delete it, but wait until you are sure that your job
     completed correctly, so you don't need the log files anymore.
     
-Reminder: check the parsyncfp log [$logfile]
-    and the fpart log [$FPART_LOGFILE] 
-    if there were errors. Use '--verbose=1' for less output.
-    You transferred [$bytesxf bytes = $ALLBYTES] via all [$NP] rsyncs.
+Reminder: check the parsyncfp log:
+  [$logfile]
+and the fpart log:
+  [$FPART_LOGFILE] 
+for errors. Use '--verbose=1' for less output.
+You transferred [$bytesxf bytes = $ALLBYTES] via all [$NP] rsyncs.
     
       Thanks for using parsyncfp. Tell me how to make it better.
                        <hjmangalam\@gmail.com>\n");
@@ -711,7 +833,7 @@ Reminder: check the parsyncfp log [$logfile]
             if ($DEBUG) {debug(__LINE__, "CUR_FPI=$CUR_FPI >= nbr_cur_fpc_fles=$nbr_cur_fpc_fles?");}
             if ($VERBOSE >= 2) {INFO("Waiting for fpart to get ahead of the transfer..\r"); }
             $nbr_cur_fpc_fles = `\\ls -U1 $glob | wc -l`; chomp $nbr_cur_fpc_fles;
-            $fparts_already_running = `ps aux | grep 'fpar[t]'`; chomp $fparts_already_running;
+            $fparts_already_running = `ps ux | grep 'fpar[t]'`; chomp $fparts_already_running;
             sleep 2;
         }
         $logfile = $parsync_dir . '/' ."rsync-logfile-" . $DATE . "_" . $CUR_FPI;
@@ -730,6 +852,7 @@ Reminder: check the parsyncfp log [$logfile]
             $CUR_FPI++;
         }
     }
+    if ($DEBUG) {debug(__LINE__,"sPIDs string = [$sPIDs]");}  
     ($rPIDs, $crr) = get_rPIDs($PIDFILE, $sPIDs);
   }
   # sleep 1;
@@ -747,13 +870,12 @@ if (defined $EMAIL){
 
 # and based on --disposal, (=c(ompress), =d(elete) =l(eave untouched)  all the chunk files.
 if ($DISPOSE =~ /d/) {
-  if ($VERBOSE >= 2) {print ".. and finally disposing of the cache...";}
+  if ($VERBOSE >= 2) {INFO("Deleting cache as requested.");}
   system("\\rm -rf ${FP_ROOT_DIR}/f*"); 
 }
 elsif ($DISPOSE =~ /c/ ) { # can it just be put into background?
-  if ($VERBOSE >= 2) {print ".. tarring up your cachefiles...";}
+  if ($VERBOSE >= 2) {INFO("Tarballing the cachefiles.")}
   $cmd="tar --remove-files -czf ${parsync_dir}/fpcache_${DATE}.tar.gz ${FP_ROOT_DIR} &";
-  #print "final tar cmd: [$cmd] \n";
   system ("$cmd");
 } elsif ($VERBOSE >=2 ) {
   INFO("Your cache files have been left intact in [${FP_ROOT_DIR}]. 
@@ -775,6 +897,9 @@ sub check_utils {
     "ethtool"   => "",
     "iwconfig"  => "",
     "fpart"     => "",
+    "scut"      => "",
+    "stats"     => "",
+    "ip"        => "",
   );
   # and check that they can be found..
   my $utilsz = keys %UTILS;
@@ -782,9 +907,11 @@ sub check_utils {
     my $utilpath = `which $util | tr -d '\n'`;
     if ($utilpath !~ /$util/){
       FATAL("[$util] not found.  you can get 'fpart' here:
-	  <http://moo.nac.uci.edu/~hjm/parsync/utils>
-      and the rest via yum, apt-get, or google.  Please install it or correct your 
-      PATH variable to include it.");
+	    <https://github.com/martymac/fpart>
+	  'scut' and 'stats' here (useful in themselves): 
+	    <https://github.com/hjmangalam/scut>
+      and the rest via yum, apt-get, or google.  
+      Please install [$util] or correct your PATH variable to include it.");
     } else {
       $UTILS{$util} = $utilpath;
       if ($DEBUG){debug(__LINE__, "Found [$util] at [$utilpath].")}
@@ -792,11 +919,12 @@ sub check_utils {
   }
 }
 
-# usage:  ($rPIDs, $crr) = get_rPIDs($PIDFILE, $sPIDs);
 sub get_rPIDs {
+# usage:  ($rPIDs, $crr) = get_rPIDs($PIDFILE, $sPIDs);
 # Inputs
   my $pidfile = shift; # string name of PIDFILE
   my $spids = shift;   # suspended PIDs in a string.
+  if ($DEBUG) {debug(__LINE__,"sPIDs string in get_rPIDs() = [$sPIDs]");}  
   my @aprPIDs = ();
   my $NSusPIDs = 0; 
   my @SusPIDs;
@@ -809,7 +937,7 @@ sub get_rPIDs {
   # how many rsyncs are running?  Check the PIDFILE against the rsync PIDs that are running
   # if there are other rsyncs running, their PIDs won't be in the PIDFILE.
   # so have to do a diff of the PIDFILE vs all PIDs of rsyncs running.
-  my $ALL_SYS_RSYNC_PIDS = `ps aux | grep rsyn[c] |  awk '{print \$2}' | sort -g | tr '\n' ' '`;  chop $ALL_SYS_RSYNC_PIDS;
+  my $ALL_SYS_RSYNC_PIDS = `ps ux | grep ' rsyn[c] ' | awk '{print \$2}' | sort -g | tr '\n' ' '`;  chop $ALL_SYS_RSYNC_PIDS;
   if ($DEBUG) { debug(__LINE__, "PIDs of all rsync procs on the system: [$ALL_SYS_RSYNC_PIDS]"); }
   $NASRP = @ASRP = split(/\s+/, $ALL_SYS_RSYNC_PIDS);
   open (PIDFILE, "<$pidfile") or FATAL("Can't open PIDFILE [$pidfile]'");
@@ -895,7 +1023,7 @@ sub pause {
 sub INFO {
     my $msg = shift;
     print color('bold blue');
-    print " INFO: $msg";
+    print "INFO: $msg \n";
     print color('reset');
 }
 
@@ -903,7 +1031,7 @@ sub INFO {
 sub WARN {
     my $msg = shift;
     print color('bold magenta');
-    print " WARN: $msg \n";
+    print "WARN: $msg \n";
     print color('reset');
 }
 
@@ -911,14 +1039,14 @@ sub WARN {
 sub ERROR {
     my $msg = shift;
     print color('bold red');
-    print " ERROR: $msg \n";
+    print "ERROR: $msg \n";
     print color('reset');
 }
 
 sub FATAL {
     my $msg = shift;
     print color('bold red');
-    print "\n ** FATAL ERROR **: $msg \n\n";
+    print "\n** FATAL ERROR **: $msg \n\n";
     print color('reset');
     exit(1);
 }

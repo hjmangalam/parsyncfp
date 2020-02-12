@@ -281,6 +281,16 @@ The correct version of the above command is:
 
 ## Changes
 
+### 1.6.3
+- added check for underflow in fpart chunks; warning emitted if # of chunks is < # of rsyncs requested
+- updated / replaced all 'route' and 'ifconfig' bits with 'ip' equivalents.  Also re-did the multihoming 
+    bits to probe, and present all routed interfaces and IP #s so user can choose the right one on a multihomed
+    host. Thanks to Ryan Novosielski for suggesting / pushing on this ;).
+- usual bits of code cleanup and messup in equal amounts, tho overall things should progress more smoothly.
+- detected a weird output format bug(?) inconsistency in CentOS 6.9 'ps' vs recent 'ps'.  Not going to fix.
+  reveals itself if exceed MAXLOAD on CentOS 6.9 - the load balancing continues to work OK afaict but the suspended PIDs aren't shown correctly.  The workaround is to set MAXLOAD high enough that it won't be invoked.
+- added more utilities to check for, before startup and corrected links to them.
+
 ### 1.6.1
 - added total raw bytes transferred as well as autoscale to MB, GB, TB in signoff stanza.
 
