@@ -95,8 +95,8 @@ $TRUSTME $N @A $bytefiles $rprtnbr $sfx $ALLBYTES $bytesxf $IB_PRSNT $CFL $rHOST
 @NETDEVLIST $NETDEVADDRLIST);
 
 $PARSYNCVER =  << "VERSION";
-parsyncfp version 1.63 (Groundhog Day)
-Feb 02, 2020
+parsyncfp version 1.64 (Covid)
+April 25, 2020
 by Harry Mangalam <hjmangalam\@gmail.com>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -776,6 +776,7 @@ do this, you will probably run into the string limit for 'ls'.
     $FPART_RUNNING = `ps ux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
     while (! -e $CUR_FP_FLE && $FPART_RUNNING eq '1'){
       if ($VERBOSE >= 2) {INFO("Waiting [$cfw]s for next chunkfile..\r"); sleep 2; $cfw += 2;}
+      $FPART_RUNNING = `ps ux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
     }
     if ($DEBUG) {debug(__LINE__,"sPIDs string = [$sPIDs]");}  
     ($rPIDs, $crr) = get_rPIDs($PIDFILE, $sPIDs);

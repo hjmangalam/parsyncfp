@@ -17,7 +17,7 @@ chunk by chunk basis.  This allows pfp to begin transferring files before the
 complete recursive descent of the source dir is complete.  This feature can save many 
 hours of prep time on very large dir trees.
 
-if your use involves transit over IB networks.parsyncfp requires 'perfquery' and 'ibstat', 
+If your use involves transit over IB networks.parsyncfp requires 'perfquery' and 'ibstat', 
 Infiniband utilities both written by Hal Rosenstock < hal.rosenstock [at] gmail.com > 
 
 pfp is primarily tested on Linux, but is being ported to MacOSX
@@ -280,6 +280,9 @@ The correct version of the above command is:
 
 
 ## Changes
+
+### 1.6.4
+- fixed bug that allowed for infinite waiting for fpart to produce another chunkfile.
 
 ### 1.6.3
 - added check for underflow in fpart chunks; warning emitted if # of chunks is < # of rsyncs requested
