@@ -280,11 +280,15 @@ The correct version of the above command is:
 
 
 ## Changes
-
-### 1.6.4
+### 1.65
+- tidied, changed a lot of output routines to consolidate subs and tested on HPC on some TB sized sets
+   to verify clean ending.  Also tested mostly complete rsyncs to verify the fpart keep-ahead routines.
+   Seems to be good.
+   
+### 1.64
 - fixed bug that allowed for infinite waiting for fpart to produce another chunkfile.
 
-### 1.6.3
+### 1.63
 - added check for underflow in fpart chunks; warning emitted if # of chunks is < # of rsyncs requested
 - updated / replaced all 'route' and 'ifconfig' bits with 'ip' equivalents.  Also re-did the multihoming 
     bits to probe, and present all routed interfaces and IP #s so user can choose the right one on a multihomed
@@ -294,7 +298,7 @@ The correct version of the above command is:
   reveals itself if exceed MAXLOAD on CentOS 6.9 - the load balancing continues to work OK afaict but the suspended PIDs aren't shown correctly.  The workaround is to set MAXLOAD high enough that it won't be invoked.
 - added more utilities to check for, before startup and corrected links to them.
 
-### 1.6.1
+### 1.61
 - added total raw bytes transferred as well as autoscale to MB, GB, TB in signoff stanza.
 
 ### 1.60
