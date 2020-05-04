@@ -100,8 +100,8 @@ use vars qw($allPIDs $ALL_SYS_RSYNC_PIDS $ch $CHECKPERIOD $cmd
   @NETDEVLIST $NETDEVADDRLIST @spinner) ;
 
 $PARSYNCVER = << "VERSION";
-parsyncfp version 1.65 (Covid)
-Apr 28, 2020
+parsyncfp version 1.67 (Covid reCovered)
+May 3, 2020
 by Harry Mangalam <hjmangalam\@gmail.com>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -470,12 +470,14 @@ if ( !defined $FROMLIST ) {
     $dirtmp = shift;
   }
 } else {    # if $FROMLIST is defined, is $TRIMPATH defined? if so, is it valid?  End with a '/'?
-  $tf = "/tmp/pfp.tmp";
+  $tf = "$parsync_dir/frmlst.tmp";
   if ( defined $TRIMPATH ) {
+    $TRIMPATH = trim($TRIMPATH);
+    if (substr($TRIMPATH, -1, 1) eq '/' ) { chop $TRIMPATH; } #$TRIMPATH must not end in '/'
     $ROOTDIR = "$TRIMPATH";
     if ( -e $TRIMPATH && -d $TRIMPATH && -r $TRIMPATH ) {
       INFO("The TRIMPATH you specified exists, is a dir, and is readable.\n");
-      $TRIMPATH = trim($TRIMPATH);
+      
 
       # print "TRIMPATH = [$TRIMPATH]\n";
 
@@ -499,51 +501,35 @@ if ( !defined $FROMLIST ) {
             # now have to process the STDIN in the same way as the file.
         INFO("Reading file list from STDIN.\n");
         $CFL = *STDIN;    # assign the $CFL filehandle to STDIN
-      } else {
-
+      } else { # read from the --fromlist file
         # use the variable $CFL (lexical FH instead of direct FH)
-        open( $CFL, "<$FROMLIST" ) or FATAL("Can't open FROMLIST [$FROMLIST]'");
+        open( CFL, "<$FROMLIST" ) or FATAL("Can't open FROMLIST [$FROMLIST]'");
       }
       open( NFL, ">$tf" ) or FATAL("Can't open TEMPFILE [$tf]'");    # NFL can can be 'normal' FH
       my $lc = 0;
-      while (<$CFL>) {
-
-        #print "\nCFL input: [$_]\n";
+      while (<CFL>) {
         $lc++;
         if ( $_ =~ /$TRIMPATH/ )
         {    # this will now hit the top-level dir line alone since it will now be '/home/hjm'
           $_ =~ s%$TRIMPATH%%;    # kill the '/home/hjm'
-                                  #print "\npost subst: [$_]"; #sleep 1;
           my $TT;
           if ($TRUSTME) {
             $N = @A = split( /\t/, $_ );
-            my $tt = substr( $A[1], 1 );
+            my $tt = substr( $A[1], 1 ); # trim the remaining '/'
             $TT = $A[0] . "\t" . $tt;
-
-            #print "\nTRUSTME OUTPUT: [$TT]";
-          } else {
-            $TT = substr( $_, 1 );
-          }                       # and now the leftover leading '/' is gone as well
-                                  #print "\nTT: [$TT]";
+          } else { $TT = substr( $_, 1 ); }  # and now the leftover leading '/' is gone as well
           print NFL $TT;
-
-          #sleep 1;
-        } else {                  # if $TRIMPATH = '/home/hjm/' subst /home/hjm/nacs/hpc -> nacs/hpc
+        } else {  # if $TRIMPATH = '/home/hjm/' subst /home/hjm/nacs/hpc -> nacs/hpc
           chomp;
           print STDERR
             "Warning: [$_] in FROMLIST [$FROMLIST] line [$lc] doesn't have a [$TRIMPATH]\n";
         }
-        close $CFL;
-        close NFL;                # just close them, don't delete, cp, or mv them.
       }    # while (<CFL>)
+      close CFL;
+      close NFL;                # just close them, don't delete, cp, or mv them.
+      if ($DEBUG) { debug( __LINE__, "# of lines in list: [$lc]"); }
     }    # if (-e $TRIMPATH && -d $TRIMPATH && -r $TRIMPATH)
   }    # if (defined $TRIMPATH)
-
-#don't want to change the FROMLIST since it may have taken a long time to generate, so use the $tf as input to fpart
-
-  #unlink "$FROMLIST" or die "FATAL: Couldn't rm [$FROMLIST]";
-  #move("$tf","$FROMLIST");
-
 }
 
 $#ARGV++;    # now incr to allow the TARGET to be captured.
@@ -639,8 +625,7 @@ while ( !-e $FP_PIDFILE ) {
   sleep 1;
   if ( $VERBOSE >= 3 ) { INFO("Waiting for fpart to be forked.\n"); }
 }
-$FPART_PID = `cat $FP_PIDFILE`;
-chomp $FPART_PID;
+$FPART_PID = `cat $FP_PIDFILE`; chomp $FPART_PID;
 my $ready2start = my $waitcnt = $NBR_FP_FLES = 0;
 my $fp0         = $FP_ROOT . ".0";
 my $fp1         = $FP_ROOT . ".1";
@@ -652,7 +637,7 @@ while ( $ready2start == 0 ) {
     $ready2start = 1;
   }
   $waitcnt++;
-  if ( $VERBOSE >= 3 ) { INFO("Waiting [$waitcnt]s for chunk files to be written.\n"); }
+  if ( $VERBOSE >= 3 ) { INFO("Waiting [$waitcnt]s for chunk files to be written.\r"); }
   sleep 1;
 }
 
@@ -677,7 +662,7 @@ while ( $RSYNCS_GOING < $NP && $KEEPGOING ) {    #
     $logfile = $bytefiles . $CUR_FPI;
     $RSYNC_CMD =
 "cd $TRIMPATH && rsync  --bwlimit=$MAXBW  $RSYNCOPTS -a -s --log-file=$logfile --files-from=$CUR_FP_FLE  $ROOTDIR  $TARGET  & echo \"\${!}\" >> $PIDFILE";
-
+    if ( $VERBOSE >= 2 ) { INFO("Starting rsync for chunkfile [$CUR_FP_FLE]..\n"); }
     # WARN("$RSYNC_CMD");
     # there will be as many logfiles as fp chunkfiles.
     # ie LOTS. but they can be deleted after the run has been verified..
@@ -687,16 +672,14 @@ while ( $RSYNCS_GOING < $NP && $KEEPGOING ) {    #
     $CUR_FPI++;
     $RSYNCS_GOING++;
   } else {    # there aren't any more fp chunk files waiting, so check to see if it's finished.
-    $FPART_RUNNING = `ps ux | grep fpar[t] | grep $FPART_PID | wc -l`;
-    chomp $FPART_RUNNING;
+    $FPART_RUNNING = `ps ux | grep fpar[t] | grep $FPART_PID | wc -l`; chomp $FPART_RUNNING;
     if ( $FPART_RUNNING eq '0' ) {
-
       # so if it's done, then we're done.  No more chunk files, so no more rsyncs to start.
       $KEEPGOING = 0;    # signal the while loop to break.
     } else {             # fpart is still going so wait for the next fpart chunkfile to be finished.
-      if ( $VERBOSE >= 2 ) { INFO("waiting [$sc]s for next chunkfile [$CUR_FP_FLE]..\r"); }
-      sleep 2;
-      $sc += 2;
+      if ( $VERBOSE >= 2 ) { INFO("Waiting [$sc]s for next chunkfile [$CUR_FP_FLE]..\r"); }
+      sleep 1;
+      $sc += 1;
     }
   }
 }    #while ($RSYNCS_GOING < $NP && $KEEPGOING)
@@ -1470,7 +1453,8 @@ to use '--trimpath' option.
 						1 path name per line.
 --trimpath|tp [s] ... path to trim from front of full path name if 
                         '--fromlist' file contains full path names and 
-                        you want to trim them.
+                        you want to trim them. Don't use a trailing '/'.  
+                        It will be removed if you do.
 --trustme|tm ........ with '--fromlist' above allows the use of file lists
                         of the form:
                         size in bytes<tab>/fully/qualified/filename/path  
