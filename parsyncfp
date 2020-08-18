@@ -86,8 +86,9 @@ use Term::ANSIColor;    # for alarms
 use vars qw($allPIDs $ALL_SYS_RSYNC_PIDS $ch $CHECKPERIOD $cmd
   $crr $CUR_FP_FLE $CUR_FPI $DATE $dcnt $DEBUG @DIRS @DIRS2SYNC $dirtmp
   $EMAIL $Filecnt %FILES $fl $fn $fnd2r $FOUT $FPART_LOGFILE $FPART_PID
-  $FPART_RUNNING $FPARTSIZE $FPARTSIZE_N $FP_PIDFILE $FP_ROOT $cyclecnt
-  $FP_ROOT_DIR $FP_RUNNING $hdr_cnt $hdr_rpt $HELP $IF_SPEED $VERBOSE
+  $FPART_RUNNING $FPARTSIZE $FPARTSIZE_N $FP_PIDFILE $FP_ROOT $FP_ROOT_DIR 
+  $FP_HOLD_ROOT $FP_HOLD_DIR $cyclecnt
+  $FP_RUNNING $hdr_cnt $hdr_rpt $HELP $IF_SPEED $VERBOSE
   $LOAD1mratio $loadavg $logfile $MAXBW $MAXLOAD $nbr_cur_fpc_fles
   $NBR_FP_FLES $NCPUs $NDIRS $NETIF $NOWAIT $NP $NP_chunk $glob $ALTCACHE
   $parsync_dir $PARSYNCVER $PIDFILE $PIDFILE $prev_cache $lenPID $DISPOSE
@@ -100,8 +101,8 @@ use vars qw($allPIDs $ALL_SYS_RSYNC_PIDS $ch $CHECKPERIOD $cmd
   @NETDEVLIST $NETDEVADDRLIST @spinner) ;
 
 $PARSYNCVER = << "VERSION";
-parsyncfp version 1.67 (Covid reCovered)
-May 3, 2020
+parsyncfp version 1.69 (Covid Synchronicity)
+Aug 17, 2020
 by Harry Mangalam <hjmangalam\@gmail.com>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -149,14 +150,13 @@ if ( !-d "$parsync_dir" ) {
   mkdir "$parsync_dir" or FATAL("Can't create the required parsyncfp logging dir [$parsync_dir]");
 }
 
-#mkdir -p $parsync_dir
 $NETFILE = "/proc/net/dev";
 $OS      = `uname -s`; chomp $OS;
 $Linux = $MacOSX = 0;
 if   ( $OS =~ /Linux/ ) { $Linux  = 1; }
 else                    { $MacOSX = 1; }
 $DFLT_RSYNCOPTS = "-a -s";    # the default options to pass to rsync; blanked if define $RSYNCOPTS
-if ( defined $VERSION ) { print colored( ['green'], $PARSYNCVER, "\n" ); exit; }
+if (  defined $VERSION )     { print colored( ['green'], $PARSYNCVER, "\n" ); exit; }
 if ( !defined $CHECKPERIOD ) { $CHECKPERIOD = 3; }
 if ( !defined $VERBOSE )     { $VERBOSE     = 2; }
 $PERFQUERY        = 0;
@@ -210,7 +210,7 @@ operation, MAKE SURE you know what you're doing.
 if ( defined $HELP )     { usage($parsync_dir); }
 if ( !defined $DISPOSE ) { $DISPOSE = 'l'; }        # for leave untouched
 
-# check_utils(); # check that the required utilities are on the system
+check_utils(); # check that the required utilities are on the system
 
 ### get the current system stats:  #CPUs, load, bandwidth, etc
 
@@ -277,7 +277,6 @@ if ( !defined $NETIF ) {
       if ( $nbr_ifs != '1' ) {
         my $rawip = `ip a | grep global`;
 
-        #print "DDD: rawip = [$rawip]";
         $NETDEVADDRLIST = "";
         my $r = 0;
         for ( split /^/, $rawip ) {
@@ -337,7 +336,7 @@ if ( $NETIF =~ /ib/ ) {
   $IB_PRSNT = 0;
 }
 
-if ( defined $DEBUG ) { $VERBOSE = 3; }                         # DEBUG = VERBOSE=3
+if ( defined $DEBUG ) { $VERBOSE = 3; }
 if ( defined $VERBOSE && ( $VERBOSE < 0 || $VERBOSE > 3 ) ) {
   die "ERROR: --verbose arg must be 0-3. Try again.\n";
 }
@@ -396,6 +395,7 @@ if ( $SYSLOAD[0] < $MAXLOAD ) {
 }
 $bytefiles   = $parsync_dir . '/' . "rsync-logfile-" . $DATE . "_";    # use this for a glob base
 $FP_ROOT_DIR = "${parsync_dir}/fpcache";
+$FP_HOLD_DIR = "${FP_ROOT_DIR}/hold";
 if ( -d $parsync_dir ) {
   if ( $VERBOSE >= 1 ) {
     WARN(
@@ -416,11 +416,16 @@ if ( -d $parsync_dir ) {
   make_path $parsync_dir or FATAL("Can't create [ $parsync_dir ]");
 }
 if ( !-d $FP_ROOT_DIR ) { mkdir $FP_ROOT_DIR or FATAL("Can't make 'FP_ROOT_DIR' [$FP_ROOT_DIR]"); }
-$FP_ROOT = $FP_ROOT_DIR . "/f";    # the root name of the fpart chunk files f.1, etc
+if ( !-d $FP_HOLD_DIR ) { mkdir $FP_HOLD_DIR or FATAL("Can't make 'FP_HOLD_DIR' [$FP_HOLD_DIR]"); }
+
+# define the root name of the fpart chunk files f.1, etc.  Held in HOLD dir until complete 
+# and then moved to $FP_ROOT_DIR 
+$FP_HOLD_ROOT = "${FP_HOLD_DIR}/f";  
+$FP_ROOT = "${FP_ROOT_DIR}/f";
 $PIDFILE       = $FP_ROOT_DIR . '/' . "rsync-PIDs" . '-' . $DATE;
 $FPART_LOGFILE = $FP_ROOT_DIR . '/' . "fpart.log." . $DATE;
 $FP_PIDFILE    = $FP_ROOT_DIR . '/' . "FP_PIDFILE" . $DATE;
-$hdr_rpt       = 20;                                             # nbr of lines to repeat the header
+$hdr_rpt       = 20;        # nbr of lines to repeat the header
 $hdr_cnt = $hdr_rpt + 1;    # header counter; > $hdr_rpt so it gets printed 1st time
 
 # this takes care of the last ARGV so that all the rest of the words are target dirs&files
@@ -452,14 +457,26 @@ if ( !defined $FROMLIST ) {
   if ($DEBUG) { debug( __LINE__, "Composing the new fpart target dirtmp in a loop." ); }
 
   # If there are no files or dirs defined, take the current dir
-  if ( !defined $dirtmp ) { $dirtmp = `pwd`; }
+  if ( !defined $dirtmp ) { 
+    FATAL("
+You didn't define the files or dirs to transfer. 
+You used the --startdir=path option without providing the actual source(s) 
+afterwards separated from the option and each other with whitespace.  
+ie: to move '/usr/local/bin & /usr/local/lib': 
+   --startdir=/usr/local bin lib TARGET
+                        ^   ^ spaces");
+  }
   while ( defined $dirtmp ) {    # should work on explicitly named dirs as well as globs.
-    $dirtmp = $ROOTDIR . '/' . $dirtmp;
+    $dirtmp = $ROOTDIR . '/' . $dirtmp;    
     if ( !-r $dirtmp ) {         # quick check to see if its readable.
       WARN(
-        "[$dirtmp] isn't readable; 
-            either it's not where you think it is or you need to escalate your privs.  
-            Regardless, it won't be transferred in this run."
+        "[$dirtmp] isn't readable. 
+            This could be due to:
+            - it's not where you think it is 
+            - you need to escalate your privs.
+        Regardless, [$dirtmp] won't be transferred in this run
+        but if you specified other dirs, we'll try them.
+        "
       );
       if    ($NOWAIT)        { sleep 3; }
       elsif ( $VERBOSE > 0 ) { pause(); }
@@ -469,8 +486,10 @@ if ( !defined $FROMLIST ) {
     }
     $dirtmp = shift;
   }
+  if ($fnd2r eq "") {FATAL("None of the dirs you specified were readable.  
+  Please check again.");}
 } else {    # if $FROMLIST is defined, is $TRIMPATH defined? if so, is it valid?  End with a '/'?
-  $tf = "$parsync_dir/frmlst.tmp";
+  $tf = "${parsync_dir}/frmlst.tmp";
   if ( defined $TRIMPATH ) {
     $TRIMPATH = trim($TRIMPATH);
     if (substr($TRIMPATH, -1, 1) eq '/' ) { chop $TRIMPATH; } #$TRIMPATH must not end in '/'
@@ -478,9 +497,6 @@ if ( !defined $FROMLIST ) {
     if ( -e $TRIMPATH && -d $TRIMPATH && -r $TRIMPATH ) {
       INFO("The TRIMPATH you specified exists, is a dir, and is readable.\n");
       
-
-      # print "TRIMPATH = [$TRIMPATH]\n";
-
 ####################################################################################
 ### here's where to handle the --risb option to allow the native '/' behavior.
 ####################################################################################
@@ -584,18 +600,26 @@ if ( defined $FROMLIST ) {
   my $AFLAG = "";
   if ($TRUSTME) { $AFLAG = "-a "; }    # if user specs the format that includes sizes
   if ( $tf eq '-' ) {
+    # the following cmd now includes the steps to write the in-process chunk files to $FP_ROOT 
+    #    $FP_HOLD_ROOT = $FP_HOLD_DIR . "/f";
+    # and then once the chunk is complete, move them to the $FP_ROOT_DIR where the action takes 
+    # place after it's found that a chunk file exists there.
     $fpartcmd =
-"fpart -v -L -s $FPARTSIZE_N $AFLAG -i '-' -o $FP_ROOT < $tf 2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
-  } else {
+"fpart -v -L  -W 'mv \$FPART_PARTFILENAME $FP_ROOT_DIR'  -s $FPARTSIZE_N $AFLAG -i '-' -o $FP_HOLD_ROOT < $tf 2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
+    if ($DEBUG) { debug( __LINE__, "fpartcmd(1) = [$fpartcmd]\n") };
+} else {  # shell variable = $FPART_PARTFILENAME
     $fpartcmd =
-"cd $TRIMPATH; fpart -v -L -s $FPARTSIZE_N $AFLAG -i $tf -o $FP_ROOT 2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
+"cd $TRIMPATH; fpart -v -L -W 'mv \$FPART_PARTFILENAME $FP_ROOT_DIR' -s $FPARTSIZE_N $AFLAG -i $tf -o $FP_HOLD_ROOT 2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
+    if ($DEBUG) { debug( __LINE__, "fpartcmd(2) = [$fpartcmd]\n") };
   }
 } else {                               # use the full recursive fpart
-                                       # capture the child PID!
+                                       # capture the child PID
   $fpartcmd =
-"fpart -v -L -z -s $FPARTSIZE_N -o $FP_ROOT $fnd2r  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
-}
+"fpart -v -L -W 'mv \$FPART_PARTFILENAME $FP_ROOT_DIR' -z -s $FPARTSIZE_N -o $FP_HOLD_ROOT $fnd2r  2> $FPART_LOGFILE & echo \"\${!}\" > $FP_PIDFILE";
+    if ($DEBUG) { debug( __LINE__, "fpartcmd(3) = [$fpartcmd]\n") };
+} # now fpart sequence works fine.  Files are created in the 'hold' subdir, then mv'ed to the $FP_ROOT_DIR on close. 
 
+## Ignore this para for now.
 # fpart -v -L  -i - < fileoffiles # this works.
 # so if use the IPC::Run3
 # run3($cmd, $stdin, $stdout, $stderr, \%options)
@@ -861,7 +885,6 @@ do this, you will probably run into the string limit for 'ls'.
       }
     }
 
-  #if ($DEBUG) {debug(__LINE__, "string rPIDs = [$rPIDs]");}
   # picks up both suspended and running PIDs and the new result has to have something in it as well.
     if ( $rPIDs =~ /\d+/ ) {    # if any still left
       my $N = my @raPIDs = split( /\s+/, $rPIDs );
@@ -925,13 +948,15 @@ do this, you will probably run into the string limit for 'ls'.
       $FPART_RUNNING = `ps ux | grep fpar[t] | grep $FPART_PID | wc -l`;
       chomp $FPART_RUNNING;
 
+      #print "before exit test: rPIDs=[$rPIDs], sPIDs=[$sPIDs], CUR_FPI=[$CUR_FPI],nbr_cur_fpc_fles=[$nbr_cur_fpc_fles],  FPART_RUNNING=[$FPART_RUNNING]\n";
+      
       if ( $rPIDs eq "" && $sPIDs eq "" && $CUR_FPI >= $nbr_cur_fpc_fles && $FPART_RUNNING == 0 ) {
 
         # then we're done - exit.
         if ( $VERBOSE >= 2 ) {
           INFO(
-            "Done.  Please check the target to make sure 
-  expected files are where they're supposed to be.\n"
+            "Done.  Please check the target to make sure expected files are 
+where they're supposed to be.\n"
           );
         }
 
@@ -957,22 +982,43 @@ do this, you will probably run into the string limit for 'ls'.
 
         my $du_cache = `du -sh $parsync_dir`;
         chomp $du_cache;
-        if ( $VERBOSE >= 2 ) {
+        if ( $VERBOSE >= 2 && $DISPOSE =~ /l/) {
           INFO( "
-    The parsyncfp cache dir takes up [$du_cache]
+    The entire parsyncfp cache dir takes up [$du_cache]
     Don't forget to delete it, but wait until you are sure that your job
-    completed correctly, so you don't need the log files anymore.
-    
-Reminder: check the parsyncfp log:
+    completed correctly, so you don't need the log files anymore.\n");
+        } 
+        INFO("Reminder: If you suspect errors, check the parsyncfp log:
   [$logfile]
 and the fpart log:
-  [$FPART_LOGFILE] 
-for errors. Use '--verbose=1' for less output.
-You transferred [$bytesxf bytes = $ALLBYTES] via all [$NP] rsyncs.
-    
-      Thanks for using parsyncfp. Tell me how to make it better.
-                       <hjmangalam\@gmail.com>\n\n" );
-        }
+  [$FPART_LOGFILE]\n");
+        # POST PROCESSING pfp to clean up details.
+          my $host = `hostname`;
+          if ( defined $EMAIL ) {
+            INFO("Mailing completion note & log to [$EMAIL]\n");
+            system("cat $FPART_LOGFILE | mail -s \"$DATE: parsyncfp on host [$host] completed\" $EMAIL");
+          }
+          if ( $DEBUG ) {debug( __LINE__,"DISPOSE=[$DISPOSE]\n");}
+          # and based on --disposal, (=c(ompress), =d(elete) =l(eave untouched)  all the chunk files.
+          if ( $DISPOSE =~ /d/ ) {
+            if ( $VERBOSE >= 2 ) { INFO("Deleting chunkfile dir as requested. Leaving logs intact.\n"); }
+            system("\\rm -rf ${FP_ROOT_DIR}/f*");
+          } elsif ( $DISPOSE =~ /c/ ) {    # can it just be put into background?
+            if ( $VERBOSE >= 2 ) { INFO("Tarballing the fpart log & chunk files (rsync logs are untouched).\n") }
+            $cmd = "tar --remove-files -czf ${parsync_dir}/fpcache_${DATE}.tar.gz ${FP_ROOT_DIR}/f.* 2> /dev/null &";
+            system("$cmd");
+            }
+            if ( $VERBOSE >= 2 ) {
+            INFO("Reminder: Your fpcache files were written in [${FP_ROOT_DIR}].
+They might still be being processed in the background as you requested via 
+the '--dispose' option [$DISPOSE].
+            
+You rsync'ed [$bytesxf bytes = $ALLBYTES] via all [$NP] rsyncs.
+            
+            Thanks for using parsyncfp. Tell me how to make it better.
+                            <hjmangalam\@gmail.com>\n\n" );
+            }
+        
         exit;
       }
       my $spinc = 0;
@@ -1025,6 +1071,8 @@ if ( defined $EMAIL ) {
   system("cat $FPART_LOGFILE | mail -s \"$DATE: parsyncfp on host [$host] completed\" $EMAIL");
 }
 
+if ($DEBUG) { debug( __LINE__,"DISPOSE=[$DISPOSE]\n")};
+
 # and based on --disposal, (=c(ompress), =d(elete) =l(eave untouched)  all the chunk files.
 if ( $DISPOSE =~ /d/ ) {
   if ( $VERBOSE >= 2 ) { INFO("Deleting cache as requested.\n"); }
@@ -1045,6 +1093,7 @@ if ( $DISPOSE =~ /d/ ) {
                 <hjmangalam\@gmail.com>\n\n"
   );
 }
+
 exit;
 
 # ================= subroutines =================
@@ -1590,7 +1639,7 @@ HELP
   close HLP;
   system("less -S $helpfile");
   unlink $helpfile;
-  die "Did that help?.
+  die "Did that help?
   Send suggestions for improvement to <hjmangalam\@gmail.com>\n";
 }
 

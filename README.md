@@ -17,7 +17,7 @@ chunk by chunk basis.  This allows pfp to begin transferring files before the
 complete recursive descent of the source dir is complete.  This feature can save many 
 hours of prep time on very large dir trees.
 
-If your use involves transit over IB networks.parsyncfp requires 'perfquery' and 'ibstat', 
+If your use involves transit over IB networks, parsyncfp requires 'perfquery' and 'ibstat', 
 Infiniband utilities both written by Hal Rosenstock < hal.rosenstock [at] gmail.com > 
 
 pfp is primarily tested on Linux, but is being ported to MacOSX
@@ -266,7 +266,8 @@ The correct version of the above command is:
 ```% parsyncfp --NP=4  --rsyncopts='--compress' --startdir=/usr  local  /media/backupdisk```
 
 ### Error Example 2
-```% parsyncfp --start-dir /home/hjm  mooslocal  hjm\@moo.boo.yoo.com:/usr/local```
+```% parsyncfp  hjm\@moo.boo.yoo.com:/usr/local --start-dir /home/hjm mooslocal
+```
 
 Why this is an error:
 
@@ -275,11 +276,45 @@ Why this is an error:
     
 The correct version of the above command is:
 
-```# ssh to hjm\@moo, install parsyncfp, then:
-% parsyncfp  --startdir=/usr  local  hjm\@remote:/home/hjm/mooslocal```
+``` # ssh to hjm\@moo, install parsyncfp, then:
+% parsyncfp  --startdir=/usr  local  hjm\@remote:/home/hjm/mooslocal 
+```
+
+### Error Example 3
+
+```% parsyncfp --NP=4 --chunksize=500M -startdir=/usr/local/bin hjm\@remote.host.edu:/home/backups
+```
+
+Why this is an error:
+
+- you've specified a 'startdir' but haven't specified the dirs or files 
+to be transferred.
+
+The correct version of the above command is:
+```% parsyncfp --NP=4 --chunksize=500M -startdir=/usr/local bin hjm\@remote.host.edu:/home/backups
+```
+
 
 
 ## Changes
+
+### 1.69 
+(Covid Synchronicity), Aug 17, 2020. No option changes, but included a significant change in the way 
+    that pfp reads the chunk files that fpart provides.  Before this versio, pfp 
+    checked only for the existence of the chunk files and
+    could therefore launch an rsync instance on a filelist that had not been completed.  If rsync overran the files,
+    This might happen when a fileset that had already been mostly transferred, 
+    and so it could theoretically exit before 
+    fpart finished the writing to the file, leaving some files unsync'ed.
+    
+pfp now uses fpart's '-W' option to run a post-file-close script to move the finished 
+    and closed file to the processing directory,
+    assuring that the chunk files are not read before fpart is finished writing
+    to them.  Thanks again to Ganael Laplanche (fpart author) for discussion and 
+    suggesting the simplest way to address the problem.
+    
+Also some better checking for nonsense or non-existent files/dirs.
+
 ### 1.65
 - tidied, changed a lot of output routines to consolidate subs and tested on HPC on some TB sized sets
    to verify clean ending.  Also tested mostly complete rsyncs to verify the fpart keep-ahead routines.
