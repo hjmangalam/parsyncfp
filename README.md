@@ -298,6 +298,11 @@ The correct version of the above command is:
 
 ## Changes
 
+### 1.70 
+(Silverado Fire), Oct 27, 2020.  No option changes.  Fixed bug about setting up the 
+   fpart command (not a problem with fpart, just coercing names with spaces to be represented 
+   correctly).
+
 ### 1.69 
 (Covid Synchronicity), Aug 17, 2020. No option changes, but included a significant change in the way 
     that pfp reads the chunk files that fpart provides.  Before this versio, pfp 

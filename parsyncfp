@@ -26,10 +26,11 @@ use Term::ANSIColor;    # for alarms
 # fn="/home/hjm/bin/parsyncfp"; cd ; cp  $fn ~/parsyncfp/; tar -cvzf parsyncfp+utils.tar.gz parsyncfp; scp parsyncfp+utils.tar.gz moo:~/public_html/parsync ;
 
 # Add changes to changelog in the README.md file
-# cd ~/gits/parsyncfp; cp ~/bin/parsyncfp .; git add parsyncfp README.md COPYRIGHT; git commit -m 'commit message'; git push
+# cd ~/gits/parsyncfp; cp ~/bin/parsyncfp .; git add parsyncfp README.md ; git commit -m 'commit message'; git push
 # check github for bug reports.
 
 # TODO
+# [x] Fix fpart to allow files with spaces in the top level spec
 # [?] Add realtime bytes transferred to scrolling output?
 # [?] use STDIN to allow output of 'find', etc to provide the files to rsync with the --fromlist opt
 #     ie, use 'if (-t STDIN)' to detect STDIN.  This actually will require pfp to take the STDIN and
@@ -101,8 +102,8 @@ use vars qw($allPIDs $ALL_SYS_RSYNC_PIDS $ch $CHECKPERIOD $cmd
   @NETDEVLIST $NETDEVADDRLIST @spinner) ;
 
 $PARSYNCVER = << "VERSION";
-parsyncfp version 1.69 (Covid Synchronicity)
-Aug 17, 2020
+parsyncfp version 1.70 (Silverado Fire)
+Oct 27, 2020
 by Harry Mangalam <hjmangalam\@gmail.com>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -110,7 +111,7 @@ parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
 network connections to increase the amount of bandwidth it can use.
 This 'fp' variant uses 'fpart' to bypass the need for a full recursive 
 descent of the dir trees before the actual transfer starts. 
-Do NOT try to use rsync --delete options'.  More help with '--help'
+Do NOT try to use rsync --delete options'.  
 parsyncfp is distributed under the Gnu Public License (GPL) v3.
 VERSION
 
@@ -481,11 +482,12 @@ ie: to move '/usr/local/bin & /usr/local/lib':
       if    ($NOWAIT)        { sleep 3; }
       elsif ( $VERBOSE > 0 ) { pause(); }
     } else {                     # otherwise, add the file to list to be chunked and  transferred.
-      $fnd2r .= $dirtmp . " ";
+      $fnd2r .= "\'$dirtmp\'" . " ";
       if ($DEBUG) { debug( __LINE__, "Looping to add the fpart target: [$fnd2r]" ); }
     }
     $dirtmp = shift;
   }
+    
   if ($fnd2r eq "") {FATAL("None of the dirs you specified were readable.  
   Please check again.");}
 } else {    # if $FROMLIST is defined, is $TRIMPATH defined? if so, is it valid?  End with a '/'?
@@ -574,10 +576,6 @@ my $x = 0;
 
 $fnd2r =~ s/^\s+|\s+$//g;    # trim leading and trailing
 
-# Up to the user to escape internal spaces in the names of target dirs.
-# keeping the following line here as a reminder to think about how to better
-# address this problem.
-#$fnd2r =~ s/ /\\ /g; # subs internal spaces with escaped spaces
 my $fpartcmd = "";
 my $stdin;
 if ( defined $FROMLIST ) {
@@ -685,7 +683,7 @@ while ( $RSYNCS_GOING < $NP && $KEEPGOING ) {    #
          # entire rsync command and PID capture (used in total of 2 places)
     $logfile = $bytefiles . $CUR_FPI;
     $RSYNC_CMD =
-"cd $TRIMPATH && rsync  --bwlimit=$MAXBW  $RSYNCOPTS -a -s --log-file=$logfile --files-from=$CUR_FP_FLE  $ROOTDIR  $TARGET  & echo \"\${!}\" >> $PIDFILE";
+"cd $TRIMPATH && rsync  --bwlimit=$MAXBW  $RSYNCOPTS -a -s --log-file=$logfile --files-from=$CUR_FP_FLE  '$ROOTDIR'  $TARGET  & echo \"\${!}\" >> $PIDFILE";
     if ( $VERBOSE >= 2 ) { INFO("Starting rsync for chunkfile [$CUR_FP_FLE]..\n"); }
     # WARN("$RSYNC_CMD");
     # there will be as many logfiles as fp chunkfiles.
@@ -1037,7 +1035,7 @@ You rsync'ed [$bytesxf bytes = $ALLBYTES] via all [$NP] rsyncs.
       $nbr_cur_fpc_fles = `\\ls -U1 $glob | wc -l`;
       chomp $nbr_cur_fpc_fles;
       $RSYNC_CMD =
-"cd $TRIMPATH && rsync  --bwlimit=$MAXBW -a -s --log-file=$logfile $RSYNCOPTS  --files-from=$CUR_FP_FLE  $ROOTDIR  $TARGET & echo \"\${!}\" >> $PIDFILE";
+"cd $TRIMPATH && rsync  --bwlimit=$MAXBW -a -s --log-file=$logfile $RSYNCOPTS  --files-from=$CUR_FP_FLE  '$ROOTDIR'  $TARGET & echo \"\${!}\" >> $PIDFILE";
       if ($DEBUG) { debug( __LINE__, "Starting [$RSYNC_CMD]" ); }
 
 # check status in a 1s loop checking to start extra rsyncs do we don't wait any more than 1s
@@ -1431,6 +1429,8 @@ parsyncfp will refuse to transfer some oddly named files (tho it should copy
 filenames with spaces fine.  Filenames with embedded newlines, DOS EOLs,
 and some other odd chars will be recorded in the log files in the 
 [.parsyncfp] dir.
+You should be able to specify dirs and files with either/both escaped spaces 
+or with quotes: [file\ with\ spaces] or ['file with spaces']
 
 == OPTIONS
 
@@ -1556,13 +1556,13 @@ silencing the STDERR doesn't hurt anything.
 
 === Good example 1
 
-% parsyncfp  --maxload=5.5 --NP=4 \
---chunksize=\$((1024 * 1024 * 4)) \
---startdir='/home/hjm' dir[123]  \
+% parsyncfp  --maxload=5.5 --NP=4 \\
+--chunksize=\$((1024 * 1024 * 4)) \\
+--startdir='/home/hjm' dir[123]  \\
 hjm\@remotehost:~/backups 2> /dev/null
 
 where
-  = -"-maxload=5.5" will start suspending rsync instances when the 1m system
+  = "--maxload=5.5" will start suspending rsync instances when the 1m system
       load gets to 5.5 and then unsuspending them when it goes below it.
   = "--NP=4" forks 4 instances of rsync
   = "--chunksize=\$((1024 * 1024 * 4))" sets the chunksize, by multiplication
@@ -1577,9 +1577,9 @@ where
 
 === Good example 2
 
-% parsyncfp   --checkperiod 6  --NP 3 \
---interface eth0  --chunksize=87682352 \
---rsyncopts="--exclude='[abc]*'"  nacs/fabio   
+% parsyncfp   --checkperiod 6  --NP 3 \\
+--interface eth0  --chunksize=87682352 \\
+--rsyncopts="--exclude='[abc]*'"  nacs/fabio   \\
 hjm\@moo:~/backups
 
 The above command shows several options used correctly:
@@ -1596,7 +1596,7 @@ long as the shell is positioned in the dir above, or has been specified via
 
 === Good example 3
 
-parsyncfp -v 1 --nowait --ac pfpcache1 --NP 4 --cp=5 --cs=50M --ro '-az'  \
+parsyncfp -v 1 --nowait --ac pfpcache1 --NP 4 --cp=5 --cs=50M --ro '-az'  \\
 linux-4.8.4 moo:~/test
 
 The above command shows:
@@ -1606,7 +1606,7 @@ The above command shows:
 - includes '--nowait' to allow unattended scripting of parsyncfp
 
                             == Good example 4 ==
-parsyncfp-list --NP=8 --chunksize=500M --fromlist=/home/hjm/dl550 \
+parsyncfp-list --NP=8 --chunksize=500M --fromlist=/home/hjm/dl550 \\
 hjm\@moo:/home/hjm/testparsync
                             
 The above command shows:
