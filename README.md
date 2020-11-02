@@ -298,6 +298,11 @@ The correct version of the above command is:
 
 ## Changes
 
+### 1.71
+(GoVote) Nov 2, 2020.  No option changes.  Changed how checking for external utilities 
+   works.  Separates the required from recommended utilities and now continues with 
+   a WARN if it doesn't find the recommended utils.
+
 ### 1.70 
 (Silverado Fire), Oct 27, 2020.  No option changes.  Fixed bug about setting up the 
    fpart command (not a problem with fpart, just coercing names with spaces to be represented 

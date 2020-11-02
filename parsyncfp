@@ -30,6 +30,7 @@ use Term::ANSIColor;    # for alarms
 # check github for bug reports.
 
 # TODO
+# [x] separate required and recommended utilities and check for them separately.
 # [x] Fix fpart to allow files with spaces in the top level spec
 # [?] Add realtime bytes transferred to scrolling output?
 # [?] use STDIN to allow output of 'find', etc to provide the files to rsync with the --fromlist opt
@@ -102,8 +103,8 @@ use vars qw($allPIDs $ALL_SYS_RSYNC_PIDS $ch $CHECKPERIOD $cmd
   @NETDEVLIST $NETDEVADDRLIST @spinner) ;
 
 $PARSYNCVER = << "VERSION";
-parsyncfp version 1.70 (Silverado Fire)
-Oct 27, 2020
+parsyncfp version 1.71 (GoVote)
+Nov 2, 2020
 by Harry Mangalam <hjmangalam\@gmail.com>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -160,6 +161,7 @@ $DFLT_RSYNCOPTS = "-a -s";    # the default options to pass to rsync; blanked if
 if (  defined $VERSION )     { print colored( ['green'], $PARSYNCVER, "\n" ); exit; }
 if ( !defined $CHECKPERIOD ) { $CHECKPERIOD = 3; }
 if ( !defined $VERBOSE )     { $VERBOSE     = 2; }
+if ( !defined $DEBUG )       { $DEBUG     = 0; }
 $PERFQUERY        = 0;
 $WARN_FPART_FILES = 2000;     # issue warning at this point.
 $MAX_FPART_FILES  = 5000;     # die at this point
@@ -211,7 +213,8 @@ operation, MAKE SURE you know what you're doing.
 if ( defined $HELP )     { usage($parsync_dir); }
 if ( !defined $DISPOSE ) { $DISPOSE = 'l'; }        # for leave untouched
 
-check_utils(); # check that the required utilities are on the system
+#check_utils(); # check that the required utilities are on the system
+check_utils($DEBUG, "ethtool scut stats ip fpart", "iwconfig perfquery");
 
 ### get the current system stats:  #CPUs, load, bandwidth, etc
 
@@ -230,7 +233,7 @@ if ($Linux) {
   FATAL("parsyncfp only supports Linux and MacOSX at this point\n");
 }
 
-@SYSLOAD = split( /\s+/, $loadavg );                # 1st 3 fields are 1, 5, 15m loads
+@SYSLOAD = split(/\s+/, $loadavg );                # 1st 3 fields are 1, 5, 15m loads
 
 # so as long as the 1m load / NCPUs < 1, we're fine; if > 1, we may want to start throttling..
 $LOAD1mratio = $SYSLOAD[0] / $NCPUs;
@@ -1095,34 +1098,33 @@ if ( $DISPOSE =~ /d/ ) {
 exit;
 
 # ================= subroutines =================
-# Define utilities required to run this version of parsync
-sub check_utils {
-  my %UTILS = (    # required utils to help this run correctly
-    "ethtool"  => "",
-    "iwconfig" => "",
-    "fpart"    => "",
-    "scut"     => "",
-    "stats"    => "",
-    "ip"       => "",
-  );
 
-  # and check that they can be found..
-  my $utilsz = keys %UTILS;
-  foreach my $util ( keys %UTILS ) {
-    my $utilpath = `which $util | tr -d '\n'`;
-    if ( $utilpath !~ /$util/ ) {
-      FATAL(
-        "[$util] not found.  you can get 'fpart' here:
-	    <https://github.com/martymac/fpart>
-	  'scut' and 'stats' here (useful in themselves): 
-	    <https://github.com/hjmangalam/scut>
-      and the rest via yum, apt-get, or google.  
-      Please install [$util] or correct your PATH variable to include it."
-      );
-    } else {
-      $UTILS{$util} = $utilpath;
-      if ($DEBUG) { debug( __LINE__, "Found [$util] at [$utilpath]." ) }
-    }
+sub check_utils($$$) {
+  my $DEBUG = shift; #print "check_utils: [$DEBUG]\n";
+  if ($DEBUG) {WARN("Checking all required and recommended utilities..");}
+  my $req = shift; #print "check_utils: [$req]\n";
+  my $rec = shift; #print "check_utils: [$rec]\n";
+  # now break them into bits.
+  my $Nreq = my @REQ = split(/\s+/, $req);
+  my $Nrec = my @REC = split(/\s+/, $rec);
+  
+  for (my $i=0; $i < $Nreq; $i++) {
+    #print "check_utils: REQ[$i] : [$REQ[$i]]\n";
+    my $utilpath = `which $REQ[$i] | tr -d '\n'`;
+    if ($utilpath eq "") {
+      FATAL("[$REQ[$i]] not found.  Can't continue without it.
+      Check the help page for more info on [$REQ[$i]]."
+      )
+    } elsif ($DEBUG) { debug( __LINE__, "Found [$REQ[$i]] at [$utilpath]." ) }
+  }
+  for (my $i=0; $i < $Nrec; $i++) {
+  #print "check_utils: REC[$i] : [$REQ[$i]]\n";
+  my $utilpath = `which $REC[$i] | tr -d '\n'`;
+    if ($utilpath eq "") {
+      WARN("[$REC[$i]] not found.  This utility is not required but some things may
+      not work. Check the help page for more info on [$REC[$i]]."
+      )
+    } elsif ($DEBUG) { debug( __LINE__, "Found [$REC[$i]] at [$utilpath]." ) }
   }
 }
 
@@ -1197,7 +1199,7 @@ sub trim {    # ($)
   return $string;
 }
 
-sub getavgnetbw {    # (###)
+sub getavgnetbw {    # ($$$$)
 
 # call as  (my $avgTCPrecv, $avgTCPsend, $avgRDMArecv, $avgRDMAsend) = getavgnetbw($NETIF, $CHECKPERIOD, $PERFQUERY);
   my (
@@ -1551,6 +1553,25 @@ Unless you want to view them, it's usually a good idea to send all STDERR
 to /dev/null (append '2> /dev/null' to the command) because there are often 
 a variety of utilities that get upset by one thing or another.  Generally
 silencing the STDERR doesn't hurt anything.
+
+== Required Utilities
+
+=== ethtool - query or control network driver and hardware settings. 
+    Install via repository.
+=== ip - show / manipulate routing, network devices, interfaces and tunnels.
+    Install via repository.
+=== fpart - Sort and pack files into partitions. 
+    Install from: https://github.com/martymac/fpart
+=== scut - more intelligent cut. 
+    Install from: https://github.com/hjmangalam/scut
+=== stats - calculate descriptive stats from STDIN (part of the scut package above)
+
+== Recommended Utilities
+
+=== iwconfig - configure a wireless network interface. Needed only for WiFi.
+    Install via repository.
+=== perfquery - query InfiniBand port counters.  Needed only for InfiniBand.
+    Install via repository.
 
 == Examples
 
