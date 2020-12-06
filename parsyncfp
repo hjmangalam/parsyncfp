@@ -103,8 +103,8 @@ use vars qw($allPIDs $ALL_SYS_RSYNC_PIDS $ch $CHECKPERIOD $cmd
   @NETDEVLIST $NETDEVADDRLIST @spinner) ;
 
 $PARSYNCVER = << "VERSION";
-parsyncfp version 1.71 (GoVote)
-Nov 2, 2020
+parsyncfp version 1.72 (California Lockdown)
+Dec 6, 2020
 by Harry Mangalam <hjmangalam\@gmail.com>
 
 parsyncfp is a Perl script that wraps Andrew Tridgell's miraculous
@@ -181,6 +181,11 @@ if ( $fpcheck eq "" ) {
     "There's no 'fpart' executable on your PATH. Did you install it?
 See: https://github.com/martymac/fpart/blob/master/README"
   );
+}
+
+if ($RSYNCOPTS =~ /-[a-zA-Z]+[vh]/ || $RSYNCOPTS =~ /-[vh]/  ) {
+    FATAL("Detected an option in your rsync option string [$RSYNCOPTS] that 
+    makes too much noise (probably -v, -h --verbose, --version). Try again..");
 }
 
 if ( !defined $RSYNCOPTS ) { $RSYNCOPTS = ""; $DFLT_RSYNCOPTS = "-a -s"; }
@@ -1536,8 +1541,13 @@ NOT use any 'delete' options with this utility.  See below.
 IMPORTANT: rsync '--delete' options will not work with '--rsyncopts' bc the 
 multiple parallel rsyncs that parsyncfp launches are independent and therefore 
 don't know about each other (and so cannot exchange info about what should
-be deleted or not.  Use a final 'rsync --delete' to clean up the transfer
-if that's your need.
+be deleted or not.  Use a final, separate 'rsync --delete' to clean up the 
+transfer if that's your need.
+
+Also, rsync options related to additional output has been disallowed to avoid 
+confusing pfp's IO handling.  -v/-verbose, --version, -h/--help are 
+caught, and pfp will die with an error.  Most of the info desired from these
+are captured in the rsync-logfile files in the ~/.parsyncfp dir.
 
 If you see an error related to "sh: /usr/bin/ls: Argument list too long", 
 it usually means that fpart has generated a huge list of chunkfiles (10s 

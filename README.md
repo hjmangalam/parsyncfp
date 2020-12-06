@@ -4,8 +4,6 @@ a parallel rsync wrapper in Perl. Released under GPL v3.
 (Version changes moved to the bottom of this file)
 
 ## See Changes at bottom.  
-The suspend/unsuspend bugs (there were actually 2) have been squashed (I think).
-
 
 ## Background
 
@@ -297,6 +295,10 @@ The correct version of the above command is:
 
 
 ## Changes
+### 1.72 
+(California Lockdown) Dec 6, 2020, No option changes.  Intercepted rsync options to forbid 
+those that increase verbosity to avoid collision with pfp's IO handling. 
+Including: -v/-verbose, --version, -h/--help 
 
 ### 1.71
 (GoVote) Nov 2, 2020.  No option changes.  Changed how checking for external utilities 
