@@ -9,7 +9,7 @@ a parallel rsync wrapper in Perl. Released under GPL v3.
 
 parsyncfp (pfp) is the offspring of my [parsync](https://github.com/hjmangalam/parsync) 
  ([more info here](http://moo.nac.uci.edu/~hjm/parsync/))
- and Ganael LaPlanche's [fpart](http://goo.gl/K1WwtD), which
+ and Ganael LaPlanche's fpart [1](https://github.com/martymac/fpart) [2](https://goo.gl/K1WwtD), which
 collects files based on size or number into chunkfiles which can be fed to rsync on a 
 chunk by chunk basis.  This allows pfp to begin transferring files before the 
 complete recursive descent of the source dir is complete.  This feature can save many 
