@@ -98,7 +98,7 @@ use vars qw($allPIDs $ALL_SYS_RSYNC_PIDS $ch $CHECKPERIOD $cmd
   $ROOTDIR $RSYNC_CMD $RSYNCOPTS $RSYNCS_GOING $STILLRSYNCS $DFLT_RSYNCOPTS
   @SYSLOAD $TARGET $tmp $Totlsiz %UTILS $VERSION $OS $Linux $MacOSX $NETFILE $myIP
   $PERFQUERY $avgTCPrecv $avgTCPsend $avgRDMArecv $avgRDMAsend
-  $WARN_FPART_FILES $MAX_FPART_FILES $SKIP_FPART_CHECK $FROMLIST $TRIMPATH $tf
+  $WARN_FPART_FILES $FROMLIST $TRIMPATH $tf
   $TRUSTME $N @A $bytefiles $rprtnbr $sfx $ALLBYTES $bytesxf $IB_PRSNT $CFL $rHOSTNAME
   @NETDEVLIST $NETDEVADDRLIST @spinner) ;
 
@@ -164,7 +164,6 @@ if ( !defined $VERBOSE )     { $VERBOSE     = 2; }
 if ( !defined $DEBUG )       { $DEBUG     = 0; }
 $PERFQUERY        = 0;
 $WARN_FPART_FILES = 2000;     # issue warning at this point.
-$MAX_FPART_FILES  = 5000;     # die at this point
 $IB_PRSNT         = 0;
 
 if ( !@ARGV ) { usage(); }    # in case someone doesn't know what to do.
@@ -359,8 +358,7 @@ if ( !defined $ROOTDIR ) { $ROOTDIR = `pwd`; chomp $ROOTDIR; }    # where all di
 if ( !defined $FPARTSIZE ) { $FPARTSIZE = "10G"; $FPARTSIZE_N = 104857600; }    # default is 10Gish
 elsif ( $FPARTSIZE < 0 ) {
   $FPARTSIZE        = $FPARTSIZE * -1;
-  $SKIP_FPART_CHECK = 1;
-}    # Tells check to ignore huge #s of chunkfiles
+}    # Not needed anymore but for backward compatibility
 if   ( $FPARTSIZE =~ /[PpTtGgMmKk]/ ) { $FPARTSIZE_N = ptgmk($FPARTSIZE); }
 else                                  { $FPARTSIZE_N = $FPARTSIZE; }
 if ($DEBUG) {
@@ -849,17 +847,6 @@ If the count goes to [$MAX_FPART_FILES], this transfer will abort. See the help 
 "
       );
       $warncount++;
-    }
-    if ( $nbr_cur_fpc_fles > $MAX_FPART_FILES && !$SKIP_FPART_CHECK ) {
-      FATAL(
-        "You've now exceeded [$MAX_FPART_FILES] chunk files, the maximum
-recommended for this utility. Please increase the '--chunksize'
-parameter significantly. If there's a good reason for exceeding it,
-you can force the internal limit to be ignored by specifying it as
-a negative number (--chunksize -10GB) the next time. However if you
-do this, you will probably run into the string limit for 'ls'.
-"
-      );
     }
   }
 
@@ -1475,11 +1462,7 @@ or with quotes: [file\ with\ spaces] or ['file with spaces']
 --chunksize|cs [s] (10G) .... aggregate size of files allocated to one rsync
                       process.  Can specify in 'human' terms [100M, 50K, 1T]
                         as well as integer bytes. pfp will warn once when/if
-                     you exceed the WARN # of chunkfiles [$WARN_FPART_FILES] and abort if
-                     you exceed the FATAL # of chunkfiles [$MAX_FPART_FILES]. You CAN force
-                        it to use very high numbers of chunkfiles by setting
-                       the number negative (--chunkfile -50GB), but this is
-                     .. unwise.
+                     you exceed the WARN # of chunkfiles [$WARN_FPART_FILES] 
 --fromlist|fl [s]  \\
 --trimpath|tp [s]   +-- see "Options for using filelists" below
 --trustme|tm       /
